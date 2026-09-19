@@ -37,15 +37,15 @@ class ValidationIssue:
 
 @dataclass(frozen=True)
 class ValidationReport:
-    """Result of validating a migration collection."""
+    """Result of migration collection validation."""
 
-    migrations: tuple[Migration, ...]
-    issues: tuple[ValidationIssue, ...]
+    migrations: list[Migration]
+    errors: list[str]
 
     @property
     def is_valid(self) -> bool:
         """Return whether validation succeeded."""
-        return not self.issues
+        return not self.errors
 
     @property
     def migration_count(self) -> int:
@@ -61,7 +61,6 @@ def _validate_version_sequence(
         return []
 
     issues: list[ValidationIssue] = []
-
     expected_version = 1
 
     for migration in migrations:
@@ -121,7 +120,6 @@ def _validate_names(
                     version=migration.version,
                 )
             )
-
         else:
             seen_names[migration.name] = migration
 
@@ -137,24 +135,14 @@ def validate_migrations(
 
     except MigrationParseError as exc:
         return ValidationReport(
-            migrations=(),
-            issues=(
-                ValidationIssue(
-                    code="MIGRATION_PARSE_ERROR",
-                    message=str(exc),
-                ),
-            ),
+            migrations=[],
+            errors=[str(exc)],
         )
 
     except MigrationDiscoveryError as exc:
         return ValidationReport(
-            migrations=(),
-            issues=(
-                ValidationIssue(
-                    code="MIGRATION_DISCOVERY_ERROR",
-                    message=str(exc),
-                ),
-            ),
+            migrations=[],
+            errors=[str(exc)],
         )
 
     issues: list[ValidationIssue] = []
@@ -162,7 +150,9 @@ def validate_migrations(
     issues.extend(_validate_version_sequence(migrations))
     issues.extend(_validate_names(migrations))
 
+    errors = [issue.format() for issue in issues]
+
     return ValidationReport(
-        migrations=migrations,
-        issues=tuple(issues),
+        migrations=list(migrations),
+        errors=errors,
     )

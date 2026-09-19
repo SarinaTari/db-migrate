@@ -81,23 +81,24 @@ def _parse_metadata(lines: list[str], path: Path) -> tuple[int, str]:
     """Parse and validate migration metadata."""
     if len(lines) < 2:
         raise MigrationParseError(
-            f"Migration '{path.name}' is missing required metadata."
+            f"Migration '{path.name}' is missing migration metadata."
         )
 
     version_match = MIGRATION_HEADER_PATTERN.match(lines[0])
 
     if version_match is None:
         raise MigrationParseError(
-            f"Migration '{path.name}' must start with "
-            "'-- migration: <version>'."
+            f"Migration '{path.name}' is missing migration metadata. "
+            "It must start with '-- migration: <version>'."
         )
 
     name_match = MIGRATION_NAME_PATTERN.match(lines[1])
 
     if name_match is None:
         raise MigrationParseError(
-            f"Migration '{path.name}' must contain "
-            "'-- name: <name>' immediately after the migration version."
+            f"Migration '{path.name}' is missing migration metadata. "
+            "It must contain '-- name: <name>' immediately after "
+            "the migration version."
         )
 
     version = int(version_match.group("version"))

@@ -2,181 +2,108 @@
 
 ## Overview
 
-`db-migrate` is a layered database migration and schema-evolution system.
-
-The architecture separates:
-
-- command-line interaction
-- configuration
-- migration discovery
-- parsing
-- validation
-- execution
-- database access
-- analysis
-
----
-
-## Current Architecture
-
-At Phase 5:
+dbmigrate is organized as a layered database migration and schema-evolution tool.
 
 ```text
 CLI
- │
- ↓
+ |
+ v
 Command Layer
- │
- ├── Configuration
- │
- └── Validation
-       │
-       ↓
-Migration Discovery
-       │
-       ↓
-Migration Parser
-       │
-       ↓
-Migration Domain Model
-
-The database execution layer has not yet been introduced.
-
-Planned Architecture
-CLI
- │
- ↓
-Command Layer
- │
- ↓
+ |
+ v
+Configuration
+ |
+ v
+Migration Discovery / Validation
+ |
+ v
 Migration Service
- │
- ├── Discovery
- ├── Parsing
- ├── Validation
- └── Planning
- │
- ↓
-Execution
- │
- ↓
-History / Integrity
- │
- ↓
-Database Interface
- │
- ├── SQLite
- ├── PostgreSQL
- └── MySQL
+ |
+ v
+Database Abstraction
+ |
+ +---- SQLite
+ |
+ +---- PostgreSQL      (future)
+ |
+ +---- MySQL          (future)
+ |
+ v
+Database
+CLI Layer
 
-Analysis components will eventually include:
-
-Analysis
-├── Linter
-├── Explainer
-└── Impact Analyzer
-
-Schema
-├── Inspector
-├── Diff
-├── Fingerprint
-└── Reproducibility
-Design Principles
-Separation of responsibilities
-
-The CLI should coordinate operations rather than contain business logic.
-
-The parser should not connect to databases.
-
-Validation should not execute SQL.
-
-Database implementations should not parse command-line arguments.
-
-Explicit failure
-
-Invalid migrations should fail clearly.
-
-The tool should prefer explicit errors over silent behavior.
-
-Deterministic behavior
-
-Migration discovery and ordering must be deterministic.
-
-Version numbers define migration order.
-
-Database independence
-
-The migration service should remain independent from the database backend.
-
-SQLite will be implemented first.
-
-PostgreSQL and MySQL will be added later.
-
-Safety
-
-The future execution system will prioritize:
-
-validation
-planning
-transactions
-checksums
-locking
-integrity checks
-Current Modules
-cli.py
-
-Handles:
+Responsible for:
 
 argument parsing
-command resolution
 command dispatch
-validation output
-config.py
+user-facing output
+exit codes
 
-Handles:
+The CLI should remain thin.
 
-project discovery
-configuration loading
-configuration validation
-migration.py
+Business logic should not be implemented directly inside argument parsing.
 
-Handles:
+Configuration Layer
 
-migration model
-filename parsing
-metadata parsing
-section parsing
+Responsible for:
+
+locating the project root
+loading dbmigrate.toml
+validating configuration
+resolving migration directories
+resolving the configured database URL
+Migration Layer
+
+Responsible for:
+
+migration filename parsing
+migration metadata
+up/down SQL extraction
 migration discovery
-validation.py
+migration ordering
+Validation Layer
 
-Handles:
+Responsible for:
 
-project-level validation
-migration sequence checks
-duplicate-name checks
-validation reports
-commands/base.py
+duplicate migration versions
+migration gaps
+duplicate migration names
+migration structure validation
+Database Layer
 
-Contains command metadata and the command registry.
+The database layer isolates database-specific behavior.
 
-Future Modules
+The abstract Database interface defines operations needed by higher layers.
 
-Expected future components include:
+SQLite is the first implementation.
 
-database/
-    base.py
-    sqlite.py
-    postgres.py
-    mysql.py
+Future database implementations should conform to the same abstraction.
 
-history.py
-runner.py
-planner.py
-checksum.py
-schema.py
-lint.py
-explain.py
-impact.py
-doctor.py
+Transaction Handling
 
-The exact module boundaries may evolve as the project develops.
+Transactions belong to the database implementation.
+
+The migration runner will later use the database transaction interface when applying migrations.
+
+Current Responsibility Boundary
+
+Phase 6 does not execute migrations.
+
+The current system can:
+
+discover migration files
+parse migrations
+validate migrations
+connect to SQLite
+execute arbitrary SQL through the database abstraction
+manage transactions
+
+The system cannot yet:
+
+track migration history
+apply migrations automatically
+roll back migrations
+calculate migration checksums
+plan pending migrations
+
+Those responsibilities belong to later phases.

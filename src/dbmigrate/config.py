@@ -21,6 +21,7 @@ class ProjectConfig:
     project_root: Path
     migrations_dir: Path
     config_path: Path
+    database_url: str
 
     @property
     def migrations_path(self) -> Path:
@@ -48,7 +49,6 @@ def find_project_root(start: Path | None = None) -> Path:
 
 def load_config(path: Path | None = None) -> ProjectConfig:
     """Load and validate a dbmigrate project configuration."""
-
     if path is None:
         project_root = find_project_root()
         config_path = project_root / DEFAULT_CONFIG_FILENAME
@@ -65,12 +65,10 @@ def load_config(path: Path | None = None) -> ProjectConfig:
     try:
         with config_path.open("rb") as file:
             data = tomllib.load(file)
-
     except tomllib.TOMLDecodeError as exc:
         raise ConfigurationError(
             f"Invalid TOML in '{config_path}': {exc}"
         ) from exc
-
     except OSError as exc:
         raise ConfigurationError(
             f"Could not read configuration file '{config_path}': {exc}"
@@ -80,13 +78,10 @@ def load_config(path: Path | None = None) -> ProjectConfig:
 
     if not isinstance(migrations_config, dict):
         raise ConfigurationError(
-            "The [migrations] configuration must be a table."
+            "The [migrations] section must be a TOML table."
         )
 
-    migrations_dir = migrations_config.get(
-        "directory",
-        "migrations",
-    )
+    migrations_dir = migrations_config.get("directory", "migrations")
 
     if not isinstance(migrations_dir, str) or not migrations_dir.strip():
         raise ConfigurationError(
@@ -102,8 +97,23 @@ def load_config(path: Path | None = None) -> ProjectConfig:
             "The migrations directory must be inside the project root."
         ) from exc
 
+    database_config = data.get("database", {})
+
+    if not isinstance(database_config, dict):
+        raise ConfigurationError(
+            "The [database] section must be a TOML table."
+        )
+
+    database_url = database_config.get("url", "sqlite:///dbmigrate.db")
+
+    if not isinstance(database_url, str) or not database_url.strip():
+        raise ConfigurationError(
+            "The database.url setting must be a non-empty string."
+        )
+
     return ProjectConfig(
         project_root=project_root,
         migrations_dir=Path(migrations_dir),
         config_path=config_path,
+        database_url=database_url,
     )

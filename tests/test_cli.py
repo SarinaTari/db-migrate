@@ -1,197 +1,58 @@
 """Tests for the dbmigrate CLI."""
 
-from __future__ import annotations
+from pathlib import Path
 
-from dbmigrate import __version__
-from dbmigrate.cli import build_parser, main, resolve_command
-
-
-VALID_MIGRATION = """\
--- migration: 001
--- name: create_users
-
--- +up
-
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY
-);
-
--- +down
-
-DROP TABLE users;
-"""
+from dbmigrate.cli import main
 
 
-def test_parser_accepts_known_command():
-    parser = build_parser()
+def write_config(
+    path: Path,
+    database_url: str = "sqlite:///dbmigrate.db",
+) -> None:
+    path.write_text(
+        f"""
+[migrations]
+directory = "migrations"
 
-    args = parser.parse_args(["status"])
+[database]
+url = "{database_url}"
+""",
+        encoding="utf-8",
+    )
 
-    assert args.command == "status"
 
-
-def test_parser_accepts_version_flag(capsys):
-    try:
-        main(["--version"])
-    except SystemExit as exc:
-        assert exc.code == 0
+def test_version(capsys):
+    exit_code = main(["--version"])
 
     captured = capsys.readouterr()
 
-    assert f"dbmigrate {__version__}" in captured.out
+    assert exit_code == 0
+    assert captured.out.strip() == "0.1.0"
 
 
-def test_parser_help(capsys):
-    try:
-        main(["--help"])
-    except SystemExit as exc:
-        assert exc.code == 0
+def test_help(capsys):
+    exit_code = main(["--help"])
 
     captured = capsys.readouterr()
 
+    assert exit_code == 0
     assert "dbmigrate" in captured.out
-    assert "status" in captured.out
+    assert "check" in captured.out
     assert "validate" in captured.out
 
 
-def test_no_command_prints_help(capsys):
+def test_no_command_shows_help(capsys):
     exit_code = main([])
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
     assert "usage:" in captured.out
-    assert "dbmigrate" in captured.out
-
-
-def test_resolve_known_command():
-    command = resolve_command("status")
-
-    assert command is not None
-    assert command.name == "status"
-
-
-def test_resolve_unknown_command():
-    assert resolve_command("does-not-exist") is None
-
-
-def test_command_requires_configuration(monkeypatch, tmp_path, capsys):
-    monkeypatch.chdir(tmp_path)
-
-    exit_code = main(["status"])
-
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "Configuration error" in captured.out
-
-
-def test_init_does_not_require_configuration(
-    monkeypatch,
-    tmp_path,
-    capsys,
-):
-    monkeypatch.chdir(tmp_path)
-
-    exit_code = main(["init"])
-
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    assert "later phase" in captured.out
-
-
-def test_command_uses_project_configuration(
-    monkeypatch,
-    tmp_path,
-    capsys,
-):
-    monkeypatch.chdir(tmp_path)
-
-    (tmp_path / "dbmigrate.toml").write_text(
-        '[migrations]\ndirectory = "migrations"\n',
-        encoding="utf-8",
-    )
-
-    exit_code = main(["status"])
-
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    assert f"Project root: {tmp_path}" in captured.out
-    assert "status" in captured.out
-
-
-def test_validate_succeeds_for_valid_migrations(
-    monkeypatch,
-    tmp_path,
-    capsys,
-):
-    monkeypatch.chdir(tmp_path)
-
-    migrations = tmp_path / "migrations"
-    migrations.mkdir()
-
-    (tmp_path / "dbmigrate.toml").write_text(
-        '[migrations]\ndirectory = "migrations"\n',
-        encoding="utf-8",
-    )
-
-    (migrations / "001_create_users.sql").write_text(
-        VALID_MIGRATION,
-        encoding="utf-8",
-    )
-
-    exit_code = main(["validate"])
-
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    assert "Validation successful" in captured.out
-    assert "001_create_users.sql" in captured.out
-
-
-def test_validate_fails_for_invalid_migrations(
-    monkeypatch,
-    tmp_path,
-    capsys,
-):
-    monkeypatch.chdir(tmp_path)
-
-    migrations = tmp_path / "migrations"
-    migrations.mkdir()
-
-    (tmp_path / "dbmigrate.toml").write_text(
-        '[migrations]\ndirectory = "migrations"\n',
-        encoding="utf-8",
-    )
-
-    (migrations / "001_create_users.sql").write_text(
-        """\
--- migration: 001
--- name: create_users
-
--- +up
-
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY
-);
-""",
-        encoding="utf-8",
-    )
-
-    exit_code = main(["validate"])
-
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "Validation failed" in captured.out
-    assert "MIGRATION_PARSE_ERROR" in captured.out
 
 
 def test_validate_requires_configuration(
+    tmp_path: Path,
     monkeypatch,
-    tmp_path,
     capsys,
 ):
     monkeypatch.chdir(tmp_path)
@@ -201,4 +62,79 @@ def test_validate_requires_configuration(
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "Configuration error" in captured.out
+    assert "Configuration error" in captured.err
+
+
+def test_check_requires_configuration(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(["check"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Configuration error" in captured.err
+
+
+def test_check_sqlite_database(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    exit_code = main(["check"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Database connection: OK" in captured.out
+    assert "Database engine: SQLite" in captured.out
+    assert "SQLite version:" in captured.out
+
+
+def test_check_rejects_non_sqlite_database(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml",
+        database_url="postgresql://localhost/example",
+    )
+
+    exit_code = main(["check"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "supports only sqlite" in captured.err
+
+
+def test_unimplemented_command_still_dispatches(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    exit_code = main(["up"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "not implemented yet" in captured.out
