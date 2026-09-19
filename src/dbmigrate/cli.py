@@ -8,11 +8,7 @@ import sys
 
 from . import __version__
 from .commands.base import Command, get_commands, resolve_command
-from .config import (
-    ConfigurationError,
-    ProjectConfig,
-    load_config,
-)
+from .config import ConfigurationError, ProjectConfig, load_config
 from .database import DatabaseError, SQLiteDatabase
 from .history import HistoryError
 from .migration import (
@@ -24,10 +20,7 @@ from .migration_creator import (
     MigrationCreationError,
     create_migration,
 )
-from .runner import (
-    MigrationRunner,
-    MigrationRunnerError,
-)
+from .runner import MigrationRunner, MigrationRunnerError
 from .status import (
     MigrationStatusError,
     MigrationStatusInspector,
@@ -39,9 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the dbmigrate argument parser."""
     parser = argparse.ArgumentParser(
         prog="dbmigrate",
-        description=(
-            "Database migration and schema-evolution tool."
-        ),
+        description="Database migration and schema-evolution tool.",
     )
 
     parser.add_argument(
@@ -66,10 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         if command.name == "create":
             command_parser.add_argument(
                 "name",
-                help=(
-                    "Migration name using lowercase letters, "
-                    "numbers, underscores, and hyphens."
-                ),
+                help="Name of the migration to create.",
             )
 
         if command.name == "down":
@@ -123,10 +111,7 @@ def run_command(
         return _run_up(config)
 
     if command.name == "down":
-        return _run_down(
-            config,
-            args.steps,
-        )
+        return _run_down(config, args.steps)
 
     if command.name == "history":
         return _run_history(config)
@@ -167,7 +152,7 @@ def _run_create(
         )
     except MigrationCreationError as exc:
         print(
-            f"Error: {exc}",
+            f"Migration creation error: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -176,6 +161,7 @@ def _run_create(
         f"Created migration "
         f"{migration.identifier}."
     )
+
     print(
         f"File: {migration.path}"
     )
@@ -183,9 +169,7 @@ def _run_create(
     return 0
 
 
-def _run_validate(
-    config: ProjectConfig,
-) -> int:
+def _run_validate(config: ProjectConfig) -> int:
     """Run migration validation."""
     try:
         report = validate_migrations(
@@ -236,8 +220,8 @@ def _create_database(
 
     if not database_url.startswith(prefix):
         print(
-            "Configuration error: only "
-            "sqlite:/// database URLs are currently supported.",
+            "Configuration error: only sqlite:/// database URLs "
+            "are currently supported.",
             file=sys.stderr,
         )
         return None
@@ -260,9 +244,7 @@ def _create_database(
     return SQLiteDatabase(path)
 
 
-def _run_check(
-    config: ProjectConfig,
-) -> int:
+def _run_check(config: ProjectConfig) -> int:
     """Check database connectivity."""
     database = _create_database(
         config.database_url
@@ -301,9 +283,7 @@ def _run_check(
         database.close()
 
 
-def _load_migrations(
-    config: ProjectConfig,
-):
+def _load_migrations(config: ProjectConfig):
     """Load migration files."""
     try:
         return discover_migrations(
@@ -318,9 +298,7 @@ def _load_migrations(
         ) from exc
 
 
-def _run_up(
-    config: ProjectConfig,
-) -> int:
+def _run_up(config: ProjectConfig) -> int:
     """Apply all pending migrations."""
     database = _create_database(
         config.database_url
@@ -423,9 +401,7 @@ def _run_down(
         database.close()
 
 
-def _run_history(
-    config: ProjectConfig,
-) -> int:
+def _run_history(config: ProjectConfig) -> int:
     """Show migration history."""
     database = _create_database(
         config.database_url
@@ -441,9 +417,7 @@ def _run_history(
 
         runner = MigrationRunner(database)
 
-        applied = runner.applied(
-            migrations
-        )
+        applied = runner.applied(migrations)
 
         if not applied:
             print(
@@ -473,9 +447,7 @@ def _run_history(
         database.close()
 
 
-def _run_current(
-    config: ProjectConfig,
-) -> int:
+def _run_current(config: ProjectConfig) -> int:
     """Show the current migration version."""
     database = _create_database(
         config.database_url
@@ -491,9 +463,7 @@ def _run_current(
 
         runner = MigrationRunner(database)
 
-        applied = runner.applied(
-            migrations
-        )
+        applied = runner.applied(migrations)
 
         if not applied:
             print(
@@ -524,9 +494,7 @@ def _run_current(
         database.close()
 
 
-def _run_status(
-    config: ProjectConfig,
-) -> int:
+def _run_status(config: ProjectConfig) -> int:
     """Show migration status."""
     database = _create_database(
         config.database_url
@@ -552,20 +520,16 @@ def _run_status(
         print("Migration status")
         print("================")
         print(
-            f"Total migrations: "
-            f"{status.total_count}"
+            f"Total migrations: {status.total_count}"
         )
         print(
-            f"Applied: "
-            f"{status.applied_count}"
+            f"Applied: {status.applied_count}"
         )
         print(
-            f"Pending: "
-            f"{status.pending_count}"
+            f"Pending: {status.pending_count}"
         )
         print(
-            f"Missing: "
-            f"{status.missing_count}"
+            f"Missing: {status.missing_count}"
         )
 
         if status.current is None:

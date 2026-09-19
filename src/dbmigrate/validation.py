@@ -130,12 +130,35 @@ def _validate_names(
     return issues
 
 
+def _validate_collection(
+    migrations: tuple[Migration, ...],
+) -> list[ValidationIssue]:
+    """Validate relationships between discovered migrations."""
+    issues: list[ValidationIssue] = []
+
+    issues.extend(
+        _validate_version_sequence(
+            migrations
+        )
+    )
+
+    issues.extend(
+        _validate_names(
+            migrations
+        )
+    )
+
+    return issues
+
+
 def validate_migrations(
     directory: Path,
 ) -> ValidationReport:
     """Discover and validate the migration collection."""
     try:
-        migrations = discover_migrations(directory)
+        migrations = discover_migrations(
+            directory
+        )
     except (
         MigrationParseError,
         MigrationDiscoveryError,
@@ -145,10 +168,9 @@ def validate_migrations(
             errors=[str(exc)],
         )
 
-    issues = [
-        *_validate_version_sequence(migrations),
-        *_validate_names(migrations),
-    ]
+    issues = _validate_collection(
+        migrations
+    )
 
     return ValidationReport(
         migrations=list(migrations),

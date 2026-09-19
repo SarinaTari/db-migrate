@@ -94,9 +94,7 @@ def get_commands() -> tuple[Command, ...]:
     return _COMMANDS
 
 
-def resolve_command(
-    name: str,
-) -> Command | None:
+def resolve_command(name: str) -> Command | None:
     """Resolve a command by name."""
     for command in _COMMANDS:
         if command.name == name:
