@@ -1,63 +1,34 @@
-# Migration Lifecycle
+## Migration lifecycle
 
-## Planned Lifecycle
-
-A migration will eventually move through several stages:
+The migration lifecycle is divided into distinct stages:
 
 ```text
-Created
-  ↓
-Discovered
-  ↓
-Parsed
-  ↓
-Validated
-  ↓
-Planned
-  ↓
-Executed
-  ↓
-Recorded
-  ↓
-Verified
+Migration file
+      |
+      v
+Parse
+      |
+      v
+Discover
+      |
+      v
+Validate
+      |
+      v
+Plan
+      |
+      v
+Execute
+      |
+      v
+Record history
 
-Rollback follows a reverse path:
+Phase 7 introduces the final Record history infrastructure.
 
-Recorded
-  ↓
-Selected for rollback
-  ↓
-Planned
-  ↓
-Executed using down SQL
-  ↓
-History updated
-Current Lifecycle
+The actual execution step is introduced in Phase 8.
 
-At Phase 4, only the first part is implemented:
+A migration should only be recorded as applied after its SQL has successfully executed.
 
-Migration File
-      ↓
-Discovery
-      ↓
-Parsing
-      ↓
-Validation
-      ↓
-Migration Object
-Phase 5
+Similarly, a migration should only be removed from history after a successful rollback.
 
-Phase 5 will extend validation from individual files to the migration collection.
-
-Phase 6+
-
-Later phases will introduce:
-
-database connections
-execution
-history
-transactions
-rollback
-checksums
-planning
-schema verification
+This separation prevents migration history from becoming an independent source of truth disconnected from database execution.

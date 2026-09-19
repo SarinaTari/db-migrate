@@ -106,4 +106,80 @@ roll back migrations
 calculate migration checksums
 plan pending migrations
 
-Those responsibilities belong to later phases.
+## Migration history
+
+Migration history is managed through the `MigrationHistory` service.
+
+```text
+MigrationHistory
+       |
+       v
+Database interface
+       |
+       +---- SQLiteDatabase
+       |
+       +---- PostgreSQLDatabase (future)
+       |
+       +---- MySQLDatabase (future)
+
+The history service does not depend directly on SQLite.
+
+This keeps database-specific behavior inside the database abstraction layer.
+
+The history table is:
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    checksum TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+);
+
+Migration execution is deliberately separate from history management.
+
+The future migration runner will coordinate:
+
+Migration
+    |
+    v
+Database transaction
+    |
+    v
+Execute SQL
+    |
+    v
+Record history
+
+---
+
+# `commands/base.py`
+
+For Phase 7, **don't add `history` as a CLI command yet**.
+
+The roadmap says:
+
+- Phase 7 → history infrastructure
+- Phase 8 → migration runner
+- Phase 11 → `status`, `history`, `current`
+
+So adding a user-facing `history` command now would blur the phase boundaries.
+
+Keep your existing `commands/base.py` unchanged for Phase 7.
+
+---
+
+# `cli.py`
+
+Likewise, **do not change `cli.py` for Phase 7**.
+
+There is no Phase 7 command to expose yet.
+
+---
+
+# Phase 7 test expectation
+
+After adding:
+
+```text
+src/dbmigrate/history.py
+tests/test_history.py
