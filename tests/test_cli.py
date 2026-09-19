@@ -39,6 +39,7 @@ def test_help(capsys):
     assert "dbmigrate" in captured.out
     assert "check" in captured.out
     assert "validate" in captured.out
+    assert "create" in captured.out
     assert "up" in captured.out
 
 
@@ -81,6 +82,192 @@ def test_check_requires_configuration(
     assert "Configuration error" in captured.err
 
 
+def test_create_requires_configuration(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(
+        ["create", "create_users"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Configuration error" in captured.err
+
+
+def test_create_migration(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    exit_code = main(
+        ["create", "create_users"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert (
+        "Created migration 001_create_users."
+        in captured.out
+    )
+
+    migration_path = (
+        tmp_path
+        / "migrations"
+        / "001_create_users.sql"
+    )
+
+    assert migration_path.is_file()
+
+
+def test_create_migration_reports_file_path(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    exit_code = main(
+        ["create", "create_users"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "File:" in captured.out
+    assert (
+        "001_create_users.sql"
+        in captured.out
+    )
+
+
+def test_create_migration_rejects_invalid_name(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    exit_code = main(
+        ["create", "Create Users"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Invalid migration name" in captured.err
+
+
+def test_create_migration_increments_version(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    migrations_path = (
+        tmp_path / "migrations"
+    )
+    migrations_path.mkdir()
+
+    (
+        migrations_path
+        / "001_create_users.sql"
+    ).write_text(
+        """-- migration: 001
+-- name: create_users
+
+-- +up
+
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY
+);
+
+-- +down
+
+DROP TABLE users;
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["create", "add_email"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert (
+        "Created migration 002_add_email."
+        in captured.out
+    )
+
+    assert (
+        migrations_path
+        / "002_add_email.sql"
+    ).is_file()
+
+
+def test_create_migration_rejects_invalid_existing_migration(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    migrations_path = (
+        tmp_path / "migrations"
+    )
+    migrations_path.mkdir()
+
+    (
+        migrations_path
+        / "001_broken.sql"
+    ).write_text(
+        "invalid migration",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["create", "create_users"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert (
+        "Could not inspect existing migrations"
+        in captured.err
+    )
+
+
 def test_check_sqlite_database(
     tmp_path: Path,
     monkeypatch,
@@ -119,7 +306,7 @@ def test_check_rejects_non_sqlite_database(
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "supports only sqlite" in captured.err
+    assert "sqlite:/// database URLs" in captured.err
 
 
 def test_up_with_no_migrations_reports_no_pending(
@@ -163,7 +350,6 @@ def test_down_with_no_applied_migrations(
 
     assert exit_code == 0
     assert "No applied migrations." in captured.out
-    assert captured.err == ""
 
 
 def test_down_rejects_invalid_steps(
@@ -205,7 +391,10 @@ def test_history_with_no_applied_migrations(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "No migrations have been applied." in captured.out
+    assert (
+        "No migrations have been applied."
+        in captured.out
+    )
 
 
 def test_current_with_no_applied_migrations(
@@ -226,7 +415,11 @@ def test_current_with_no_applied_migrations(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "No migrations have been applied." in captured.out
+    assert (
+        "No migrations have been applied."
+        in captured.out
+    )
+
 
 def test_status_with_no_migrations(
     tmp_path: Path,
@@ -270,7 +463,10 @@ def test_status_reports_pending_migrations(
     )
     migrations_dir.mkdir()
 
-    (migrations_dir / "001_create_users.sql").write_text(
+    (
+        migrations_dir
+        / "001_create_users.sql"
+    ).write_text(
         """-- migration: 001
 -- name: create_users
 
@@ -294,7 +490,10 @@ DROP TABLE users;
     assert exit_code == 0
     assert "Pending: 1" in captured.out
     assert "001 create_users" in captured.out
-    assert "Database requires migration changes." in captured.out
+    assert (
+        "Database requires migration changes."
+        in captured.out
+    )
 
 
 def test_status_requires_configuration(

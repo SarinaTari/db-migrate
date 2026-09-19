@@ -8,7 +8,10 @@ from dbmigrate.commands.base import (
 
 def test_commands_have_unique_names():
     commands = get_commands()
-    names = [command.name for command in commands]
+    names = [
+        command.name
+        for command in commands
+    ]
 
     assert len(names) == len(set(names))
 
@@ -18,6 +21,13 @@ def test_check_command_exists():
 
     assert command is not None
     assert command.name == "check"
+
+
+def test_create_command_exists():
+    command = resolve_command("create")
+
+    assert command is not None
+    assert command.name == "create"
 
 
 def test_all_commands_have_descriptions():

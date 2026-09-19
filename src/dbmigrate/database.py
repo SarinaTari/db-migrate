@@ -5,7 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 import sqlite3
-from typing import Any, Iterable
+from types import TracebackType
+from typing import Any, Iterable, Self
 
 
 class DatabaseError(Exception):
@@ -56,11 +57,28 @@ class Database(ABC):
         """Roll back the current transaction."""
 
     @abstractmethod
-    def transaction(self):
+    def transaction(self) -> "Transaction":
         """Return a transaction context manager."""
 
 
-class SQLiteTransaction:
+class Transaction(ABC):
+    """Abstract transaction context manager."""
+
+    @abstractmethod
+    def __enter__(self) -> Database:
+        """Begin the transaction and return the database."""
+
+    @abstractmethod
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        """Commit or roll back the transaction."""
+
+
+class SQLiteTransaction(Transaction):
     """Context manager for SQLite transactions."""
 
     def __init__(self, database: "SQLiteDatabase") -> None:
@@ -72,9 +90,9 @@ class SQLiteTransaction:
 
     def __exit__(
         self,
-        exc_type,
-        exc_value,
-        traceback,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> bool:
         if exc_type is None:
             self.database.commit()
@@ -110,24 +128,34 @@ class SQLiteDatabase(Database):
             return
 
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
             self._connection = sqlite3.connect(
                 self.path,
                 isolation_level=None,
             )
-            self._connection.execute("PRAGMA foreign_keys = ON")
+
+            self._connection.execute(
+                "PRAGMA foreign_keys = ON"
+            )
+
         except sqlite3.Error as exc:
             self._connection = None
 
             raise DatabaseError(
-                f"Could not connect to SQLite database '{self.path}': {exc}"
+                f"Could not connect to SQLite database "
+                f"'{self.path}': {exc}"
             ) from exc
+
         except OSError as exc:
             self._connection = None
 
             raise DatabaseError(
-                f"Could not prepare SQLite database path '{self.path}': {exc}"
+                f"Could not prepare SQLite database path "
+                f"'{self.path}': {exc}"
             ) from exc
 
     def close(self) -> None:
@@ -135,14 +163,16 @@ class SQLiteDatabase(Database):
         if self._connection is None:
             return
 
+        connection = self._connection
+        self._connection = None
+
         try:
-            self._connection.close()
+            connection.close()
         except sqlite3.Error as exc:
             raise DatabaseError(
-                f"Could not close SQLite database '{self.path}': {exc}"
+                f"Could not close SQLite database "
+                f"'{self.path}': {exc}"
             ) from exc
-        finally:
-            self._connection = None
 
     def execute(
         self,
@@ -151,7 +181,10 @@ class SQLiteDatabase(Database):
     ) -> None:
         """Execute SQL without returning rows."""
         try:
-            self.connection.execute(sql, tuple(parameters))
+            self.connection.execute(
+                sql,
+                tuple(parameters),
+            )
         except sqlite3.Error as exc:
             raise DatabaseError(
                 f"SQLite execution failed: {exc}"
@@ -164,10 +197,16 @@ class SQLiteDatabase(Database):
     ) -> tuple[Any, ...] | None:
         """Execute SQL and return one row."""
         try:
-            cursor = self.connection.execute(sql, tuple(parameters))
-            row = cursor.fetchone()
-            cursor.close()
-            return row
+            cursor = self.connection.execute(
+                sql,
+                tuple(parameters),
+            )
+
+            try:
+                return cursor.fetchone()
+            finally:
+                cursor.close()
+
         except sqlite3.Error as exc:
             raise DatabaseError(
                 f"SQLite query failed: {exc}"
@@ -180,10 +219,16 @@ class SQLiteDatabase(Database):
     ) -> list[tuple[Any, ...]]:
         """Execute SQL and return all rows."""
         try:
-            cursor = self.connection.execute(sql, tuple(parameters))
-            rows = cursor.fetchall()
-            cursor.close()
-            return rows
+            cursor = self.connection.execute(
+                sql,
+                tuple(parameters),
+            )
+
+            try:
+                return cursor.fetchall()
+            finally:
+                cursor.close()
+
         except sqlite3.Error as exc:
             raise DatabaseError(
                 f"SQLite query failed: {exc}"

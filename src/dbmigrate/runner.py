@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 from typing import Sequence
 
@@ -57,17 +56,15 @@ class MigrationRunner:
 
         for migration in ordered:
             try:
-                applied = self.history.is_applied(
+                if not self.history.is_applied(
                     migration.version
-                )
+                ):
+                    pending.append(migration)
             except HistoryError as exc:
                 raise MigrationRunnerError(
                     f"Could not determine migration state for "
                     f"{migration.identifier}: {exc}"
                 ) from exc
-
-            if not applied:
-                pending.append(migration)
 
         return pending
 
@@ -87,7 +84,9 @@ class MigrationRunner:
 
         for migration in ordered:
             try:
-                if self.history.is_applied(migration.version):
+                if self.history.is_applied(
+                    migration.version
+                ):
                     result.append(migration)
             except HistoryError as exc:
                 raise MigrationRunnerError(
@@ -105,29 +104,28 @@ class MigrationRunner:
         self.initialize()
 
         try:
-            if self.history.is_applied(migration.version):
+            if self.history.is_applied(
+                migration.version
+            ):
                 raise MigrationRunnerError(
-                    f"Migration {migration.identifier} is already applied."
+                    f"Migration {migration.identifier} "
+                    "is already applied."
                 )
 
-            checksum = _calculate_checksum(migration)
+            checksum = _calculate_checksum(
+                migration
+            )
 
-            self.database.begin()
-
-            try:
-                self.database.execute(migration.up_sql)
+            with self.database.transaction():
+                self.database.execute(
+                    migration.up_sql
+                )
 
                 self.history.record(
                     migration.version,
                     migration.name,
                     checksum,
                 )
-
-                self.database.commit()
-
-            except Exception:
-                self.database.rollback()
-                raise
 
         except MigrationRunnerError:
             raise
@@ -161,7 +159,9 @@ class MigrationRunner:
         results: list[MigrationResult] = []
 
         for migration in self.pending(migrations):
-            results.append(self.apply(migration))
+            results.append(
+                self.apply(migration)
+            )
 
         return results
 
@@ -179,23 +179,18 @@ class MigrationRunner:
 
             if record is None:
                 raise MigrationRunnerError(
-                    f"Migration {migration.identifier} is not applied."
+                    f"Migration {migration.identifier} "
+                    "is not applied."
                 )
 
-            self.database.begin()
-
-            try:
-                self.database.execute(migration.down_sql)
+            with self.database.transaction():
+                self.database.execute(
+                    migration.down_sql
+                )
 
                 self.history.remove(
-                    migration.version,
+                    migration.version
                 )
-
-                self.database.commit()
-
-            except Exception:
-                self.database.rollback()
-                raise
 
         except MigrationRunnerError:
             raise
@@ -231,9 +226,9 @@ class MigrationRunner:
         if not applied:
             return None
 
-        migration = applied[-1]
-
-        return self.rollback(migration)
+        return self.rollback(
+            applied[-1]
+        )
 
     def rollback_steps(
         self,
@@ -259,13 +254,19 @@ class MigrationRunner:
 
         results: list[MigrationResult] = []
 
-        for migration in reversed(applied[-steps:]):
-            results.append(self.rollback(migration))
+        for migration in reversed(
+            applied[-steps:]
+        ):
+            results.append(
+                self.rollback(migration)
+            )
 
         return results
 
 
-def _calculate_checksum(migration: Migration) -> str:
+def _calculate_checksum(
+    migration: Migration,
+) -> str:
     """Calculate a deterministic checksum for a migration."""
     content = (
         f"{migration.version}\n"
@@ -277,8 +278,3 @@ def _calculate_checksum(migration: Migration) -> str:
     return hashlib.sha256(
         content.encode("utf-8")
     ).hexdigest()
-
-
-def _utc_timestamp() -> str:
-    """Return the current UTC timestamp in ISO 8601 format."""
-    return datetime.now(timezone.utc).isoformat()

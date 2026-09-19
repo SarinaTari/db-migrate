@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from .database import Database, DatabaseError
 
@@ -57,24 +58,18 @@ class MigrationHistory:
         applied_at: str | None = None,
     ) -> MigrationRecord:
         """Record an applied migration."""
-        if version < 1:
-            raise HistoryError(
-                "Migration version must be greater than zero."
-            )
-
-        if not name:
-            raise HistoryError(
-                "Migration name must not be empty."
-            )
-
-        if not checksum:
-            raise HistoryError(
-                "Migration checksum must not be empty."
-            )
+        _validate_version(version)
+        _validate_name(name)
+        _validate_checksum(checksum)
 
         self.initialize()
 
         timestamp = applied_at or _utc_timestamp()
+
+        if not timestamp.strip():
+            raise HistoryError(
+                "Migration applied_at timestamp must not be empty."
+            )
 
         try:
             self.database.execute(
@@ -83,11 +78,17 @@ class MigrationHistory:
                     (version, name, checksum, applied_at)
                 VALUES (?, ?, ?, ?)
                 """,
-                (version, name, checksum, timestamp),
+                (
+                    version,
+                    name,
+                    checksum,
+                    timestamp,
+                ),
             )
         except DatabaseError as exc:
             raise HistoryError(
-                f"Could not record migration {version:03d}: {exc}"
+                f"Could not record migration "
+                f"{version:03d}: {exc}"
             ) from exc
 
         return MigrationRecord(
@@ -99,10 +100,7 @@ class MigrationHistory:
 
     def remove(self, version: int) -> None:
         """Remove a migration from the history."""
-        if version < 1:
-            raise HistoryError(
-                "Migration version must be greater than zero."
-            )
+        _validate_version(version)
 
         self.initialize()
 
@@ -116,15 +114,13 @@ class MigrationHistory:
             )
         except DatabaseError as exc:
             raise HistoryError(
-                f"Could not remove migration {version:03d}: {exc}"
+                f"Could not remove migration "
+                f"{version:03d}: {exc}"
             ) from exc
 
     def is_applied(self, version: int) -> bool:
         """Return whether a migration version is recorded as applied."""
-        if version < 1:
-            raise HistoryError(
-                "Migration version must be greater than zero."
-            )
+        _validate_version(version)
 
         self.initialize()
 
@@ -139,24 +135,29 @@ class MigrationHistory:
             )
         except DatabaseError as exc:
             raise HistoryError(
-                f"Could not check migration {version:03d}: {exc}"
+                f"Could not check migration "
+                f"{version:03d}: {exc}"
             ) from exc
 
         return row is not None
 
-    def get(self, version: int) -> MigrationRecord | None:
+    def get(
+        self,
+        version: int,
+    ) -> MigrationRecord | None:
         """Return a migration record by version."""
-        if version < 1:
-            raise HistoryError(
-                "Migration version must be greater than zero."
-            )
+        _validate_version(version)
 
         self.initialize()
 
         try:
             row = self.database.fetch_one(
                 f"""
-                SELECT version, name, checksum, applied_at
+                SELECT
+                    version,
+                    name,
+                    checksum,
+                    applied_at
                 FROM {HISTORY_TABLE}
                 WHERE version = ?
                 """,
@@ -164,18 +165,14 @@ class MigrationHistory:
             )
         except DatabaseError as exc:
             raise HistoryError(
-                f"Could not retrieve migration {version:03d}: {exc}"
+                f"Could not retrieve migration "
+                f"{version:03d}: {exc}"
             ) from exc
 
         if row is None:
             return None
 
-        return MigrationRecord(
-            version=int(row[0]),
-            name=str(row[1]),
-            checksum=str(row[2]),
-            applied_at=str(row[3]),
-        )
+        return _record_from_row(row)
 
     def list_applied(self) -> list[MigrationRecord]:
         """Return all applied migrations in version order."""
@@ -184,7 +181,11 @@ class MigrationHistory:
         try:
             rows = self.database.fetch_all(
                 f"""
-                SELECT version, name, checksum, applied_at
+                SELECT
+                    version,
+                    name,
+                    checksum,
+                    applied_at
                 FROM {HISTORY_TABLE}
                 ORDER BY version ASC
                 """
@@ -195,12 +196,7 @@ class MigrationHistory:
             ) from exc
 
         return [
-            MigrationRecord(
-                version=int(row[0]),
-                name=str(row[1]),
-                checksum=str(row[2]),
-                applied_at=str(row[3]),
-            )
+            _record_from_row(row)
             for row in rows
         ]
 
@@ -211,7 +207,11 @@ class MigrationHistory:
         try:
             row = self.database.fetch_one(
                 f"""
-                SELECT version, name, checksum, applied_at
+                SELECT
+                    version,
+                    name,
+                    checksum,
+                    applied_at
                 FROM {HISTORY_TABLE}
                 ORDER BY version DESC
                 LIMIT 1
@@ -225,11 +225,62 @@ class MigrationHistory:
         if row is None:
             return None
 
-        return MigrationRecord(
-            version=int(row[0]),
-            name=str(row[1]),
-            checksum=str(row[2]),
-            applied_at=str(row[3]),
+        return _record_from_row(row)
+
+
+def _record_from_row(
+    row: tuple[Any, ...],
+) -> MigrationRecord:
+    """Convert a database row into a migration record."""
+    if len(row) != 4:
+        raise HistoryError(
+            "Invalid migration history row."
+        )
+
+    try:
+        version = int(row[0])
+        name = str(row[1])
+        checksum = str(row[2])
+        applied_at = str(row[3])
+    except (TypeError, ValueError) as exc:
+        raise HistoryError(
+            "Invalid migration history record."
+        ) from exc
+
+    return MigrationRecord(
+        version=version,
+        name=name,
+        checksum=checksum,
+        applied_at=applied_at,
+    )
+
+
+def _validate_version(version: int) -> None:
+    """Validate a migration version."""
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise HistoryError(
+            "Migration version must be an integer."
+        )
+
+    if version < 1:
+        raise HistoryError(
+            "Migration version must be greater than zero."
+        )
+
+
+def _validate_name(name: str) -> None:
+    """Validate a migration name."""
+    if not isinstance(name, str) or not name.strip():
+        raise HistoryError(
+            "Migration name must not be empty."
+        )
+
+
+def _validate_checksum(checksum: str) -> None:
+    """Validate a migration checksum."""
+    if not isinstance(checksum, str) or not checksum.strip():
+        raise HistoryError(
+            "Migration checksum must not be empty."
         )
 
 

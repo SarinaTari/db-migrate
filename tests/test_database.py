@@ -11,22 +11,32 @@ from dbmigrate.database import (
 
 
 def test_sqlite_database_connects(tmp_path: Path):
-    database = SQLiteDatabase(tmp_path / "test.db")
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
 
     database.connect()
 
     assert database.is_connected
-    assert database.path == (tmp_path / "test.db").resolve()
+    assert database.path == (
+        tmp_path / "test.db"
+    ).resolve()
 
     database.close()
 
     assert not database.is_connected
 
 
-def test_sqlite_database_creates_database_file(tmp_path: Path):
-    database_path = tmp_path / "nested" / "test.db"
+def test_sqlite_database_creates_database_file(
+    tmp_path: Path,
+):
+    database_path = (
+        tmp_path / "nested" / "test.db"
+    )
 
-    database = SQLiteDatabase(database_path)
+    database = SQLiteDatabase(
+        database_path
+    )
     database.connect()
 
     assert database_path.exists()
@@ -34,8 +44,29 @@ def test_sqlite_database_creates_database_file(tmp_path: Path):
     database.close()
 
 
-def test_sqlite_database_executes_sql(tmp_path: Path):
-    database = SQLiteDatabase(tmp_path / "test.db")
+def test_sqlite_database_connect_is_idempotent(
+    tmp_path: Path,
+):
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
+
+    database.connect()
+    first_connection = database.connection
+
+    database.connect()
+
+    assert database.connection is first_connection
+
+    database.close()
+
+
+def test_sqlite_database_executes_sql(
+    tmp_path: Path,
+):
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
     database.connect()
 
     database.execute(
@@ -62,8 +93,12 @@ def test_sqlite_database_executes_sql(tmp_path: Path):
     database.close()
 
 
-def test_sqlite_database_fetches_all_rows(tmp_path: Path):
-    database = SQLiteDatabase(tmp_path / "test.db")
+def test_sqlite_database_fetches_all_rows(
+    tmp_path: Path,
+):
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
     database.connect()
 
     database.execute(
@@ -97,8 +132,12 @@ def test_sqlite_database_fetches_all_rows(tmp_path: Path):
     database.close()
 
 
-def test_sqlite_transaction_commits(tmp_path: Path):
-    database = SQLiteDatabase(tmp_path / "test.db")
+def test_sqlite_transaction_commits(
+    tmp_path: Path,
+):
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
     database.connect()
 
     database.execute(
@@ -128,7 +167,9 @@ def test_sqlite_transaction_commits(tmp_path: Path):
 def test_sqlite_transaction_rolls_back_on_error(
     tmp_path: Path,
 ):
-    database = SQLiteDatabase(tmp_path / "test.db")
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
     database.connect()
 
     database.execute(
@@ -147,7 +188,49 @@ def test_sqlite_transaction_rolls_back_on_error(
                 ("Sarina",),
             )
 
-            raise RuntimeError("simulated failure")
+            raise RuntimeError(
+                "simulated failure"
+            )
+
+    rows = database.fetch_all(
+        "SELECT name FROM users"
+    )
+
+    assert rows == []
+
+    database.close()
+
+
+def test_sqlite_transaction_rolls_back_on_sql_error(
+    tmp_path: Path,
+):
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
+    database.connect()
+
+    database.execute(
+        """
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL
+        )
+        """
+    )
+
+    with pytest.raises(
+        DatabaseError,
+        match="SQLite execution failed",
+    ):
+        with database.transaction():
+            database.execute(
+                "INSERT INTO users (name) VALUES (?)",
+                ("Sarina",),
+            )
+
+            database.execute(
+                "THIS IS NOT VALID SQL"
+            )
 
     rows = database.fetch_all(
         "SELECT name FROM users"
@@ -161,7 +244,9 @@ def test_sqlite_transaction_rolls_back_on_error(
 def test_sqlite_database_enables_foreign_keys(
     tmp_path: Path,
 ):
-    database = SQLiteDatabase(tmp_path / "test.db")
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
     database.connect()
 
     row = database.fetch_one(
@@ -173,17 +258,26 @@ def test_sqlite_database_enables_foreign_keys(
     database.close()
 
 
-def test_database_requires_connection(tmp_path: Path):
-    database = SQLiteDatabase(tmp_path / "test.db")
+def test_database_requires_connection(
+    tmp_path: Path,
+):
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
 
-    with pytest.raises(DatabaseError, match="not connected"):
+    with pytest.raises(
+        DatabaseError,
+        match="not connected",
+    ):
         database.execute("SELECT 1")
 
 
 def test_invalid_sql_raises_database_error(
     tmp_path: Path,
 ):
-    database = SQLiteDatabase(tmp_path / "test.db")
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
     database.connect()
 
     with pytest.raises(
@@ -200,8 +294,24 @@ def test_invalid_sql_raises_database_error(
 def test_close_is_safe_when_not_connected(
     tmp_path: Path,
 ):
-    database = SQLiteDatabase(tmp_path / "test.db")
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
 
+    database.close()
+
+    assert not database.is_connected
+
+
+def test_close_can_be_called_twice(
+    tmp_path: Path,
+):
+    database = SQLiteDatabase(
+        tmp_path / "test.db"
+    )
+
+    database.connect()
+    database.close()
     database.close()
 
     assert not database.is_connected

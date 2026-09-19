@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from .history import HistoryError, MigrationRecord
+from .history import MigrationRecord
 from .migration import Migration
 from .runner import MigrationRunner, MigrationRunnerError
 
@@ -50,13 +50,14 @@ class MigrationStatusInspector:
     ) -> MigrationStatus:
         """Inspect applied, pending, and missing migrations."""
         try:
-            applied = self.runner.applied(migrations)
-            pending = self.runner.pending(migrations)
+            applied = self.runner.applied(
+                migrations
+            )
+            pending = self.runner.pending(
+                migrations
+            )
             history = self.runner.history.list_applied()
-        except (
-            MigrationRunnerError,
-            HistoryError,
-        ) as exc:
+        except Exception as exc:
             raise MigrationStatusError(
                 f"Could not inspect migration status: {exc}"
             ) from exc

@@ -43,7 +43,9 @@ url = "sqlite:///dbmigrate.db"
     assert config.database_url == "sqlite:///dbmigrate.db"
 
 
-def test_database_url_defaults_to_sqlite(tmp_path: Path):
+def test_database_url_defaults_to_sqlite(
+    tmp_path: Path,
+):
     config_path = tmp_path / "dbmigrate.toml"
 
     write_config(
@@ -82,7 +84,9 @@ url = "sqlite:///database.db"
     assert find_project_root(nested) == project_root
 
 
-def test_missing_config_raises_error(tmp_path: Path):
+def test_missing_config_raises_error(
+    tmp_path: Path,
+):
     with pytest.raises(
         ConfigurationError,
         match="does not exist",
@@ -92,7 +96,9 @@ def test_missing_config_raises_error(tmp_path: Path):
         )
 
 
-def test_invalid_toml_raises_error(tmp_path: Path):
+def test_invalid_toml_raises_error(
+    tmp_path: Path,
+):
     config_path = tmp_path / "dbmigrate.toml"
 
     write_config(
@@ -150,7 +156,7 @@ directory = "../outside"
         load_config(config_path)
 
 
-def test_database_section_must_be_table(
+def test_database_key_inside_migrations_section_is_ignored(
     tmp_path: Path,
 ):
     config_path = tmp_path / "dbmigrate.toml"
@@ -160,13 +166,10 @@ def test_database_section_must_be_table(
         """
 [migrations]
 directory = "migrations"
-
 database = "sqlite:///db.db"
 """,
     )
 
-    # This structure is actually a valid TOML key inside
-    # [migrations], so it should not be interpreted as [database].
     config = load_config(config_path)
 
     assert config.database_url == "sqlite:///dbmigrate.db"

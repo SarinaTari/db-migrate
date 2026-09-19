@@ -3,11 +3,8 @@
 
 -- +up
 
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL
-);
+-- Write your SQL here.
 
 -- +down
 
-DROP TABLE users;
+-- Write your rollback SQL here.

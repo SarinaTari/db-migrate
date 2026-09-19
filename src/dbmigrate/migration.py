@@ -71,20 +71,24 @@ def _parse_filename(path: Path) -> tuple[int, str]:
 
     if version < 1:
         raise MigrationParseError(
-            f"Migration version must be greater than zero: '{path.name}'."
+            f"Migration version must be greater than zero: "
+            f"'{path.name}'."
         )
 
     return version, name
 
 
-def _parse_metadata(lines: list[str], path: Path) -> tuple[int, str]:
+def _parse_metadata(
+    lines: list[str],
+    path: Path,
+) -> tuple[int, str]:
     """Parse and validate migration metadata."""
     if len(lines) < 2:
         raise MigrationParseError(
             f"Migration '{path.name}' is missing migration metadata."
         )
 
-    version_match = MIGRATION_HEADER_PATTERN.match(lines[0])
+    version_match = MIGRATION_HEADER_PATTERN.fullmatch(lines[0])
 
     if version_match is None:
         raise MigrationParseError(
@@ -92,7 +96,7 @@ def _parse_metadata(lines: list[str], path: Path) -> tuple[int, str]:
             "It must start with '-- migration: <version>'."
         )
 
-    name_match = MIGRATION_NAME_PATTERN.match(lines[1])
+    name_match = MIGRATION_NAME_PATTERN.fullmatch(lines[1])
 
     if name_match is None:
         raise MigrationParseError(
@@ -106,7 +110,8 @@ def _parse_metadata(lines: list[str], path: Path) -> tuple[int, str]:
 
     if version < 1:
         raise MigrationParseError(
-            f"Migration version must be greater than zero: '{path.name}'."
+            f"Migration version must be greater than zero: "
+            f"'{path.name}'."
         )
 
     return version, name
@@ -150,8 +155,13 @@ def _extract_sections(
             f"'{UP_MARKER}' before '{DOWN_MARKER}'."
         )
 
-    up_sql = "\n".join(lines[up_index + 1 : down_index]).strip()
-    down_sql = "\n".join(lines[down_index + 1 :]).strip()
+    up_sql = "\n".join(
+        lines[up_index + 1 : down_index]
+    ).strip()
+
+    down_sql = "\n".join(
+        lines[down_index + 1 :]
+    ).strip()
 
     if not up_sql:
         raise MigrationParseError(
@@ -190,7 +200,10 @@ def parse_migration(path: Path) -> Migration:
     lines = content.splitlines()
 
     filename_version, filename_name = _parse_filename(path)
-    metadata_version, metadata_name = _parse_metadata(lines, path)
+    metadata_version, metadata_name = _parse_metadata(
+        lines,
+        path,
+    )
 
     if filename_version != metadata_version:
         raise MigrationParseError(
@@ -206,7 +219,10 @@ def parse_migration(path: Path) -> Migration:
             f"metadata has '{metadata_name}'."
         )
 
-    up_sql, down_sql = _extract_sections(lines, path)
+    up_sql, down_sql = _extract_sections(
+        lines,
+        path,
+    )
 
     return Migration(
         version=metadata_version,
@@ -217,7 +233,9 @@ def parse_migration(path: Path) -> Migration:
     )
 
 
-def discover_migrations(directory: Path) -> tuple[Migration, ...]:
+def discover_migrations(
+    directory: Path,
+) -> tuple[Migration, ...]:
     """Discover and parse all migration files in a directory."""
     directory = directory.expanduser().resolve()
 
@@ -231,14 +249,20 @@ def discover_migrations(directory: Path) -> tuple[Migration, ...]:
             f"Migration path is not a directory: '{directory}'."
         )
 
-    migration_files = sorted(directory.glob("*.sql"))
+    migration_files = sorted(
+        directory.glob("*.sql")
+    )
 
     migrations: list[Migration] = []
 
     for path in migration_files:
-        migrations.append(parse_migration(path))
+        migrations.append(
+            parse_migration(path)
+        )
 
-    migrations.sort(key=lambda migration: migration.version)
+    migrations.sort(
+        key=lambda migration: migration.version
+    )
 
     seen_versions: set[int] = set()
 

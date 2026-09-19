@@ -30,7 +30,10 @@ class ValidationIssue:
             location = f" [{self.path.name}]"
 
         if self.version is not None:
-            location = f" [version {self.version:03d}]" + location
+            location = (
+                f" [version {self.version:03d}]"
+                + location
+            )
 
         return f"{self.code}{location}: {self.message}"
 
@@ -78,15 +81,14 @@ def _validate_version_sequence(
                         version=migration.version,
                     )
                 )
-
-            elif migration.version < expected_version:
+            else:
                 issues.append(
                     ValidationIssue(
                         code="MIGRATION_ORDER",
                         message=(
-                            f"Migration version {migration.version:03d} "
-                            f"appears where {expected_version:03d} "
-                            "was expected."
+                            f"Migration version "
+                            f"{migration.version:03d} appears where "
+                            f"{expected_version:03d} was expected."
                         ),
                         path=migration.path,
                         version=migration.version,
@@ -106,7 +108,9 @@ def _validate_names(
     seen_names: dict[str, Migration] = {}
 
     for migration in migrations:
-        previous = seen_names.get(migration.name)
+        previous = seen_names.get(
+            migration.name
+        )
 
         if previous is not None:
             issues.append(
@@ -132,27 +136,24 @@ def validate_migrations(
     """Discover and validate the migration collection."""
     try:
         migrations = discover_migrations(directory)
-
-    except MigrationParseError as exc:
+    except (
+        MigrationParseError,
+        MigrationDiscoveryError,
+    ) as exc:
         return ValidationReport(
             migrations=[],
             errors=[str(exc)],
         )
 
-    except MigrationDiscoveryError as exc:
-        return ValidationReport(
-            migrations=[],
-            errors=[str(exc)],
-        )
-
-    issues: list[ValidationIssue] = []
-
-    issues.extend(_validate_version_sequence(migrations))
-    issues.extend(_validate_names(migrations))
-
-    errors = [issue.format() for issue in issues]
+    issues = [
+        *_validate_version_sequence(migrations),
+        *_validate_names(migrations),
+    ]
 
     return ValidationReport(
         migrations=list(migrations),
-        errors=errors,
+        errors=[
+            issue.format()
+            for issue in issues
+        ],
     )

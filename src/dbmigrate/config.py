@@ -26,12 +26,12 @@ class ProjectConfig:
     @property
     def migrations_path(self) -> Path:
         """Return the absolute path to the migrations directory."""
-        return self.project_root / self.migrations_dir
+        return (self.project_root / self.migrations_dir).resolve()
 
 
 def find_project_root(start: Path | None = None) -> Path:
     """Find the nearest directory containing dbmigrate.toml."""
-    current = (start or Path.cwd()).resolve()
+    current = (start or Path.cwd()).expanduser().resolve()
 
     if current.is_file():
         current = current.parent
@@ -43,7 +43,8 @@ def find_project_root(start: Path | None = None) -> Path:
             return directory
 
     raise ConfigurationError(
-        f"Could not find {DEFAULT_CONFIG_FILENAME} starting from '{current}'."
+        f"Could not find {DEFAULT_CONFIG_FILENAME} "
+        f"starting from '{current}'."
     )
 
 
@@ -71,7 +72,8 @@ def load_config(path: Path | None = None) -> ProjectConfig:
         ) from exc
     except OSError as exc:
         raise ConfigurationError(
-            f"Could not read configuration file '{config_path}': {exc}"
+            f"Could not read configuration file "
+            f"'{config_path}': {exc}"
         ) from exc
 
     migrations_config = data.get("migrations", {})
@@ -81,20 +83,32 @@ def load_config(path: Path | None = None) -> ProjectConfig:
             "The [migrations] section must be a TOML table."
         )
 
-    migrations_dir = migrations_config.get("directory", "migrations")
+    migrations_dir = migrations_config.get(
+        "directory",
+        "migrations",
+    )
 
-    if not isinstance(migrations_dir, str) or not migrations_dir.strip():
+    if not isinstance(migrations_dir, str):
         raise ConfigurationError(
-            "The migrations.directory setting must be a non-empty string."
+            "The migrations.directory setting must be a string."
         )
 
-    migrations_path = (project_root / migrations_dir).resolve()
+    if not migrations_dir.strip():
+        raise ConfigurationError(
+            "The migrations.directory setting must be "
+            "a non-empty string."
+        )
+
+    migrations_path = (
+        project_root / migrations_dir
+    ).resolve()
 
     try:
         migrations_path.relative_to(project_root)
     except ValueError as exc:
         raise ConfigurationError(
-            "The migrations directory must be inside the project root."
+            "The migrations directory must be inside "
+            "the project root."
         ) from exc
 
     database_config = data.get("database", {})
@@ -104,11 +118,20 @@ def load_config(path: Path | None = None) -> ProjectConfig:
             "The [database] section must be a TOML table."
         )
 
-    database_url = database_config.get("url", "sqlite:///dbmigrate.db")
+    database_url = database_config.get(
+        "url",
+        "sqlite:///dbmigrate.db",
+    )
 
-    if not isinstance(database_url, str) or not database_url.strip():
+    if not isinstance(database_url, str):
         raise ConfigurationError(
-            "The database.url setting must be a non-empty string."
+            "The database.url setting must be a string."
+        )
+
+    if not database_url.strip():
+        raise ConfigurationError(
+            "The database.url setting must be "
+            "a non-empty string."
         )
 
     return ProjectConfig(
