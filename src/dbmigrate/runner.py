@@ -1,9 +1,11 @@
-"""Migration execution and forward migration management."""
+"""Migration execution and rollback."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
+from typing import Sequence
 
 from .database import Database, DatabaseError
 from .history import HistoryError, MigrationHistory
@@ -15,48 +17,45 @@ class MigrationRunnerError(Exception):
 
 
 @dataclass(frozen=True)
-class AppliedMigration:
-    """Describe a migration successfully applied by the runner."""
+class MigrationResult:
+    """Result of applying or rolling back a migration."""
 
     migration: Migration
-    checksum: str
+    action: str
+    checksum: str | None = None
 
 
 class MigrationRunner:
-    """Execute pending migrations against a database."""
+    """Apply and roll back database migrations."""
 
-    def __init__(
-        self,
-        database: Database,
-        history: MigrationHistory | None = None,
-    ) -> None:
+    def __init__(self, database: Database) -> None:
         self.database = database
-        self.history = history or MigrationHistory(database)
+        self.history = MigrationHistory(database)
 
     def initialize(self) -> None:
-        """Initialize the migration history storage."""
+        """Initialize migration history storage."""
         try:
             self.history.initialize()
-        except HistoryError as exc:
+        except (DatabaseError, HistoryError) as exc:
             raise MigrationRunnerError(
-                f"Could not initialize migration runner: {exc}"
+                f"Could not initialize migration history: {exc}"
             ) from exc
 
     def pending(
         self,
-        migrations: list[Migration] | tuple[Migration, ...],
+        migrations: Sequence[Migration],
     ) -> list[Migration]:
-        """Return migrations that have not yet been applied in version order."""
+        """Return unapplied migrations in version order."""
         self.initialize()
 
-        ordered_migrations = sorted(
+        ordered = sorted(
             migrations,
             key=lambda migration: migration.version,
         )
 
         pending: list[Migration] = []
 
-        for migration in ordered_migrations:
+        for migration in ordered:
             try:
                 applied = self.history.is_applied(
                     migration.version
@@ -72,11 +71,37 @@ class MigrationRunner:
 
         return pending
 
+    def applied(
+        self,
+        migrations: Sequence[Migration],
+    ) -> list[Migration]:
+        """Return applied migrations in version order."""
+        self.initialize()
+
+        ordered = sorted(
+            migrations,
+            key=lambda migration: migration.version,
+        )
+
+        result: list[Migration] = []
+
+        for migration in ordered:
+            try:
+                if self.history.is_applied(migration.version):
+                    result.append(migration)
+            except HistoryError as exc:
+                raise MigrationRunnerError(
+                    f"Could not determine migration state for "
+                    f"{migration.identifier}: {exc}"
+                ) from exc
+
+        return result
+
     def apply(
         self,
         migration: Migration,
-    ) -> AppliedMigration:
-        """Apply one migration atomically with its history record."""
+    ) -> MigrationResult:
+        """Apply one migration atomically."""
         self.initialize()
 
         try:
@@ -84,62 +109,160 @@ class MigrationRunner:
                 raise MigrationRunnerError(
                     f"Migration {migration.identifier} is already applied."
                 )
-        except HistoryError as exc:
-            raise MigrationRunnerError(
-                f"Could not determine whether migration "
-                f"{migration.identifier} is applied: {exc}"
-            ) from exc
 
-        checksum = _calculate_checksum(migration)
+            checksum = _calculate_checksum(migration)
 
-        try:
-            with self.database.transaction():
+            self.database.begin()
+
+            try:
                 self.database.execute(migration.up_sql)
 
-                self.database.execute(
-                    """
-                    INSERT INTO schema_migrations
-                        (version, name, checksum, applied_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (
-                        migration.version,
-                        migration.name,
-                        checksum,
-                        _utc_timestamp(),
-                    ),
+                self.history.record(
+                    migration.version,
+                    migration.name,
+                    checksum,
                 )
+
+                self.database.commit()
+
+            except Exception:
+                self.database.rollback()
+                raise
+
         except MigrationRunnerError:
             raise
-        except DatabaseError as exc:
+
+        except (
+            DatabaseError,
+            HistoryError,
+        ) as exc:
             raise MigrationRunnerError(
                 f"Failed to apply migration "
                 f"{migration.identifier}: {exc}"
             ) from exc
 
-        return AppliedMigration(
+        except Exception as exc:
+            raise MigrationRunnerError(
+                f"Failed to apply migration "
+                f"{migration.identifier}: {exc}"
+            ) from exc
+
+        return MigrationResult(
             migration=migration,
+            action="applied",
             checksum=checksum,
         )
 
     def apply_all(
         self,
-        migrations: list[Migration] | tuple[Migration, ...],
-    ) -> list[AppliedMigration]:
+        migrations: Sequence[Migration],
+    ) -> list[MigrationResult]:
         """Apply all pending migrations in version order."""
-        ordered_migrations = sorted(
-            migrations,
-            key=lambda migration: migration.version,
+        results: list[MigrationResult] = []
+
+        for migration in self.pending(migrations):
+            results.append(self.apply(migration))
+
+        return results
+
+    def rollback(
+        self,
+        migration: Migration,
+    ) -> MigrationResult:
+        """Roll back one applied migration atomically."""
+        self.initialize()
+
+        try:
+            record = self.history.get(
+                migration.version
+            )
+
+            if record is None:
+                raise MigrationRunnerError(
+                    f"Migration {migration.identifier} is not applied."
+                )
+
+            self.database.begin()
+
+            try:
+                self.database.execute(migration.down_sql)
+
+                self.history.remove(
+                    migration.version,
+                )
+
+                self.database.commit()
+
+            except Exception:
+                self.database.rollback()
+                raise
+
+        except MigrationRunnerError:
+            raise
+
+        except (
+            DatabaseError,
+            HistoryError,
+        ) as exc:
+            raise MigrationRunnerError(
+                f"Failed to roll back migration "
+                f"{migration.identifier}: {exc}"
+            ) from exc
+
+        except Exception as exc:
+            raise MigrationRunnerError(
+                f"Failed to roll back migration "
+                f"{migration.identifier}: {exc}"
+            ) from exc
+
+        return MigrationResult(
+            migration=migration,
+            action="rolled back",
+            checksum=record.checksum,
         )
 
-        pending = self.pending(ordered_migrations)
+    def rollback_latest(
+        self,
+        migrations: Sequence[Migration],
+    ) -> MigrationResult | None:
+        """Roll back the latest applied migration."""
+        applied = self.applied(migrations)
 
-        applied: list[AppliedMigration] = []
+        if not applied:
+            return None
 
-        for migration in pending:
-            applied.append(self.apply(migration))
+        migration = applied[-1]
 
-        return applied
+        return self.rollback(migration)
+
+    def rollback_steps(
+        self,
+        migrations: Sequence[Migration],
+        steps: int,
+    ) -> list[MigrationResult]:
+        """Roll back the requested number of latest migrations."""
+        if steps < 1:
+            raise MigrationRunnerError(
+                "Rollback steps must be greater than zero."
+            )
+
+        applied = self.applied(migrations)
+
+        if not applied:
+            return []
+
+        if steps > len(applied):
+            raise MigrationRunnerError(
+                f"Cannot roll back {steps} migrations; "
+                f"only {len(applied)} are currently applied."
+            )
+
+        results: list[MigrationResult] = []
+
+        for migration in reversed(applied[-steps:]):
+            results.append(self.rollback(migration))
+
+        return results
 
 
 def _calculate_checksum(migration: Migration) -> str:
@@ -158,6 +281,4 @@ def _calculate_checksum(migration: Migration) -> str:
 
 def _utc_timestamp() -> str:
     """Return the current UTC timestamp in ISO 8601 format."""
-    from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).isoformat()

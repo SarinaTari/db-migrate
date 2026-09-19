@@ -383,3 +383,139 @@ def test_pending_preserves_version_order(
         ]
     finally:
         database.close()
+
+
+def test_rollback_removes_latest_migration(
+    tmp_path: Path,
+) -> None:
+    database = create_database(tmp_path)
+
+    try:
+        migrations = [
+            make_migration(
+                tmp_path,
+                1,
+                "first",
+                "CREATE TABLE users (id INTEGER);",
+                "DROP TABLE users;",
+            ),
+        ]
+
+        runner = MigrationRunner(database)
+
+        applied = runner.apply_all(migrations)
+
+        assert len(applied) == 1
+        assert runner.applied(migrations) == migrations
+
+        result = runner.rollback_latest(
+            migrations
+        )
+
+        assert result is not None
+        assert result.migration.version == 1
+        assert result.action == "rolled back"
+
+        assert runner.applied(migrations) == []
+
+    finally:
+        database.close()
+
+
+def test_rollback_steps_rolls_back_latest_first(
+    tmp_path: Path,
+) -> None:
+    database = create_database(tmp_path)
+
+    try:
+        migrations = [
+            make_migration(
+                tmp_path,
+                1,
+                "first",
+                "SELECT 1;",
+                "SELECT 1;",
+            ),
+            make_migration(
+                tmp_path,
+                2,
+                "second",
+                "SELECT 2;",
+                "SELECT 2;",
+            ),
+            make_migration(
+                tmp_path,
+                3,
+                "third",
+                "SELECT 3;",
+                "SELECT 3;",
+            ),
+        ]
+
+        runner = MigrationRunner(database)
+
+        runner.apply_all(migrations)
+
+        results = runner.rollback_steps(
+            migrations,
+            2,
+        )
+
+        assert [
+            result.migration.version
+            for result in results
+        ] == [3, 2]
+
+        assert [
+            migration.version
+            for migration in runner.applied(migrations)
+        ] == [1]
+
+    finally:
+        database.close()
+
+
+def test_rollback_without_applied_migrations_returns_none(
+    tmp_path: Path,
+) -> None:
+    database = create_database(tmp_path)
+
+    try:
+        migrations = [
+            make_migration(
+                tmp_path,
+                1,
+                "first",
+                "SELECT 1;",
+                "SELECT 1;",
+            ),
+        ]
+
+        runner = MigrationRunner(database)
+
+        result = runner.rollback_latest(
+            migrations
+        )
+
+        assert result is None
+
+    finally:
+        database.close()
+
+
+def test_rollback_steps_rejects_zero(
+    tmp_path: Path,
+) -> None:
+    database = create_database(tmp_path)
+
+    try:
+        runner = MigrationRunner(database)
+
+        with pytest.raises(
+            MigrationRunnerError,
+            match="greater than zero",
+        ):
+            runner.rollback_steps([], 0)
+
+    finally:
+        database.close()
