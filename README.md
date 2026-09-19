@@ -1,262 +1,166 @@
-# Database Migration Tool
+# db-migrate
 
-A Python-based database migration and schema-evolution tool focused on **safety, explainability, integrity, and migration analysis**.
+A Python-based database migration and schema-evolution CLI focused on safety, integrity, and explainability.
 
-The project is being built from scratch as a serious Computer Engineering portfolio project.
-
-It is inspired conceptually by tools such as Alembic, Flyway, and Liquibase, but it is **not intended to be a compatible replacement** for any of them.
+The project is being built from scratch as a serious software-engineering project rather than as a simple migration script.
 
 ---
 
-## Project Goals
+## Project Goal
 
-The tool will eventually provide a command-line workflow for managing versioned database schema changes.
+`db-migrate` is designed to manage versioned database schema changes while making migrations understandable, testable, reproducible, and safe.
 
-The core workflow will be:
+The project will begin with SQLite and later introduce PostgreSQL and MySQL.
 
-```text
-Migration Files
-       │
-       ▼
-   Discovery
-       │
-       ▼
-   Validation
-       │
-       ▼
-    Planning
-       │
-       ▼
-   Execution
-       │
-       ▼
- Migration History
-```
+The long-term goal is not simply to execute SQL files.
 
-Later, the system will also provide analysis capabilities:
+The tool will provide:
 
-```text
-Migration
-    │
-    ├── Lint
-    ├── Explain
-    ├── Impact Analysis
-    └── Risk Findings
-```
+* migration discovery
+* migration validation
+* migration execution
+* rollback
+* migration history
+* integrity verification
+* checksums
+* migration planning
+* migration linting
+* migration explanation
+* schema inspection
+* schema comparison
+* schema fingerprints
+* reproducibility checks
+* impact analysis
+* safety diagnostics
+* CI-oriented validation
 
-and schema capabilities:
-
-```text
-Database
-    │
-    ├── Schema Inspection
-    ├── Schema Diff
-    ├── Fingerprint
-    └── Reproducibility Verification
-```
-
----
-
-## Planned Database Support
-
-Development will begin with:
-
-```text
-SQLite
-```
-
-Later phases will add:
-
-```text
-PostgreSQL
-MySQL
-```
-
-The migration engine will be designed so that database-specific behavior can be isolated behind database adapters.
-
----
-
-## Planned CLI
-
-The final CLI is expected to contain commands such as:
-
-```text
-init
-create
-up
-down
-status
-history
-current
-validate
-plan
-lint
-explain
-impact
-schema
-schema-diff
-fingerprint
-doctor
-check
-verify-schema
-version
-```
-
-The command set may change during development when actual engineering requirements justify it.
+Only features that have actually been implemented will be advertised as available functionality.
 
 ---
 
 ## Project Identity
 
-This project is intentionally more than a basic migration runner.
-
-Its identity is:
-
-> A safety-focused, explainable database migration and schema-evolution system that can inspect, validate, plan, execute, and analyze schema changes.
-
-The core migration engine will remain conventional and reliable.
-
-Distinctive features will be added only after the core engine is correct.
+| Item             | Value             |
+| ---------------- | ----------------- |
+| Repository       | `db-migrate`      |
+| Python package   | `dbmigrate`       |
+| CLI              | `dbmigrate`       |
+| Language         | Python            |
+| Initial database | SQLite            |
+| Later databases  | PostgreSQL, MySQL |
+| License          | MIT               |
 
 ---
 
 ## Current Status
 
-### Phase 0 — Understanding Database Migrations
+The project is currently in **Phase 1 — Professional Python Project Foundation**.
 
-Status:
+Phase 0 established the project's conceptual model, architecture, migration lifecycle, safety principles, and documentation.
 
-```text
-IN PROGRESS
-```
+Phase 1 establishes:
 
-Phase 0 focuses on understanding the problem domain before writing the migration engine.
+* the Python package
+* the `src/` layout
+* project packaging
+* CLI entry point
+* version handling
+* pytest configuration
+* initial automated tests
 
-Topics include:
-
-* database schemas
-* schema evolution
-* migrations
-* migration versions
-* migration history
-* up/down migrations
-* transactions
-* rollback
-* DDL and DML
-* migration ordering
-* migration integrity
-* reproducibility
-* database-specific behavior
-
-No production migration engine is implemented yet.
+The migration engine has not been implemented yet.
 
 ---
 
-## Development Philosophy
+## Planned Commands
 
-The project follows these principles:
-
-### Correctness before features
-
-A small correct migration engine is more valuable than a large unreliable framework.
-
-### Understand before abstracting
-
-Architecture should evolve from real requirements.
-
-### Database behavior must be explicit
-
-SQLite, PostgreSQL, and MySQL do not behave identically.
-
-### Safety over convenience
-
-Potentially destructive operations should be visible to the user.
-
-### No fake intelligence
-
-Analysis features must clearly distinguish:
+The planned CLI will eventually include commands such as:
 
 ```text
-Detected fact
+dbmigrate init
+dbmigrate create
+dbmigrate up
+dbmigrate down
+dbmigrate status
+dbmigrate history
+dbmigrate current
+dbmigrate validate
+dbmigrate plan
+dbmigrate lint
+dbmigrate explain
+dbmigrate impact
+dbmigrate schema
+dbmigrate schema-diff
+dbmigrate fingerprint
+dbmigrate doctor
+dbmigrate check
+dbmigrate verify-schema
+dbmigrate version
 ```
 
-from:
-
-```text
-Potential concern
-```
-
-The tool must not pretend to understand arbitrary SQL perfectly.
-
-### Measure before optimizing
-
-Performance improvements should be based on actual measurements.
-
-### Reproducibility matters
-
-A migration history should be capable of reconstructing the intended schema from an empty database.
+These commands are part of the project's planned roadmap and should not be interpreted as already implemented.
 
 ---
 
-## Planned Architecture
+## Architecture
 
-The conceptual architecture is:
-
-```text
-                    CLI
-                     │
-                     ▼
-              Command Layer
-                     │
-                     ▼
-             Migration Service
-                     │
-       ┌─────────────┼─────────────┐
-       │             │             │
-       ▼             ▼             ▼
-  Discovery       Planning      Validation
-       │             │             │
-       └─────────────┼─────────────┘
-                     ▼
-                 Execution
-                     │
-              ┌──────┴──────┐
-              ▼             ▼
-          History       Integrity
-              │             │
-              └──────┬──────┘
-                     ▼
-             Database Interface
-                     │
-        ┌────────────┼────────────┐
-        ▼            ▼            ▼
-     SQLite      PostgreSQL      MySQL
-```
-
-Later analysis components will operate alongside the migration engine:
+The intended architecture is:
 
 ```text
-Migration
-    │
-    ├── Linter
-    ├── Explainer
-    └── Impact Analyzer
+CLI
+ |
+ v
+Command Layer
+ |
+ v
+Migration Service
+ |
+ +--> Discovery
+ |
+ +--> Planning
+ |
+ +--> Validation
+ |
+ +--> Execution
+ |
+ +--> History
+ |
+ +--> Integrity
+ |
+ v
+Database Interface
+ |
+ +--> SQLite
+ +--> PostgreSQL
+ +--> MySQL
 ```
+
+Additional analysis layers will eventually provide:
+
+```text
+Migration Analysis
+ |
+ +--> Linter
+ +--> Explainer
+ +--> Impact Analyzer
+
+Schema Analysis
+ |
+ +--> Inspector
+ +--> Diff
+ +--> Fingerprint
+ +--> Reproducibility
+```
+
+The architecture will evolve as implementation reveals real requirements.
+
+The project deliberately avoids unnecessary abstraction before it is justified.
 
 ---
 
 ## Migration Model
 
-The initial migration format is planned to look like:
-
-```text
-migrations/
-├── 001_create_users.sql
-├── 002_add_email.sql
-└── 003_create_projects.sql
-```
-
-A migration will eventually contain an `up` section and a `down` section:
+The planned migration format is:
 
 ```sql
 -- migration: 001
@@ -274,15 +178,11 @@ CREATE TABLE users (
 DROP TABLE users;
 ```
 
-This format is not yet implemented.
+Migrations will be versioned and applied in a deterministic order.
 
----
+The migration history will eventually be tracked inside the target database.
 
-## Planned Metadata
-
-The migration engine will eventually maintain database-side migration history.
-
-A conceptual table is:
+A conceptual history table is:
 
 ```sql
 CREATE TABLE schema_migrations (
@@ -293,54 +193,182 @@ CREATE TABLE schema_migrations (
 );
 ```
 
-The exact schema may evolve as the implementation develops.
+The actual implementation will be introduced in later phases.
 
 ---
 
-## Safety Features
+## Safety Principles
 
-Planned safety mechanisms include:
+Database migration software can modify important persistent state.
 
-* dry-run execution
-* migration planning
-* migration validation
-* checksums
-* destructive-operation warnings
-* migration locking
-* schema verification
-* reproducibility checks
-* migration doctor
-* CI mode
+The project therefore prioritizes:
 
-These will be implemented progressively.
+* deterministic execution
+* transaction safety where supported
+* explicit planning
+* dry-run behavior
+* validation
+* migration checksums
+* history integrity
+* failure visibility
+* reproducibility
+* clear error messages
+* conservative behavior
+
+The tool should prefer making potentially dangerous behavior visible before performing it.
 
 ---
 
-## What This Project Will Not Become
+## Development Philosophy
 
-The project will intentionally avoid becoming:
+The project is being developed incrementally.
 
-* an ORM
-* a database backup system
-* a cloud database management platform
-* a Kubernetes database operator
-* a universal SQL translation engine
-* a full Alembic/Flyway/Liquibase replacement
-* a distributed database orchestrator
-* an automatic production migration repair system
+Each phase should:
 
-The goal is:
+1. introduce a coherent capability
+2. explain the underlying engineering concept
+3. implement the capability
+4. test the implementation
+5. document the result
+6. leave the repository in a working state
+
+The project should not become a collection of unrelated features.
+
+---
+
+## Development Setup
+
+Python 3.12 or newer is required.
+
+Create a virtual environment:
+
+```bash
+python3 -m venv .venv
+```
+
+Activate it on macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Install the project with development dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+---
+
+## Running the CLI
+
+After installation:
+
+```bash
+dbmigrate --help
+```
+
+Check the version:
+
+```bash
+dbmigrate --version
+```
+
+Expected:
 
 ```text
-Small enough to understand
-+
-Complex enough to demonstrate engineering ability
+dbmigrate 0.1.0
+```
+
+---
+
+## Running Tests
+
+Run the complete test suite:
+
+```bash
+pytest
+```
+
+or:
+
+```bash
+python -m pytest
+```
+
+---
+
+## Project Structure
+
+```text
+db-migrate/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── pyproject.toml
+│
+├── docs/
+│   ├── architecture.md
+│   ├── database-migrations.md
+│   ├── migration-lifecycle.md
+│   ├── phase-0.md
+│   └── phase-1.md
+│
+├── migrations/
+│   └── .gitkeep
+│
+├── src/
+│   └── dbmigrate/
+│       ├── __init__.py
+│       └── cli.py
+│
+└── tests/
+    └── test_cli.py
+```
+
+---
+
+## Roadmap
+
+```text
+Phase 0  Database Migration Concepts                 ✓
+Phase 1  Professional Python Project               ✓
+Phase 2  CLI Foundation                             →
+Phase 3  Configuration
+Phase 4  Migration Format
+Phase 5  Discovery and Validation
+Phase 6  Database Interface + SQLite
+Phase 7  Migration History
+Phase 8  Migration Runner
+Phase 9  Transaction and Failure Semantics
+Phase 10 Down/Rollback
+Phase 11 Status/History/Current
+Phase 12 Create Command
+Phase 13 Validation
+Phase 14 Checksums
+Phase 15 Dry Run and Planning
+Phase 16 Migration Linter
+Phase 17 Explain and Impact
+Phase 18 Schema Inspection/Fingerprints
+Phase 19 Schema Diff/Reproducibility
+Phase 20 Database Abstraction Review
+Phase 21 PostgreSQL
+Phase 22 MySQL
+Phase 23 SQL Dialect/Capability System
+Phase 24 Locking/Concurrency
+Phase 25 Safety and Doctor
+Phase 26 CI Mode
+Phase 27 Logging
+Phase 28 Performance
+Phase 29 Full Integration Testing
+Phase 30 Architecture Review
+Phase 31 Documentation
+Phase 32 Example Project
+Phase 33 Portfolio Finalization
 ```
 
 ---
 
 ## License
 
-The project will use an open-source license.
-
-The final license will be selected before the first public release.
+This project is licensed under the MIT License.

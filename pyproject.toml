@@ -5,16 +5,47 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dbmigrate"
 version = "0.1.0"
-description = "A safety-focused database migration and schema-evolution tool."
+description = "A Python-based database migration and schema-evolution CLI focused on safety, integrity, and explainability."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
     { name = "Sarina Tari" }
 ]
+keywords = [
+    "database",
+    "migration",
+    "schema",
+    "sqlite",
+    "postgresql",
+    "mysql",
+    "cli"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Version Control"
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0"
+]
 
 [project.scripts]
 dbmigrate = "dbmigrate.cli:main"
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
