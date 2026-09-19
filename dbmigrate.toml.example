@@ -1,0 +1,4 @@
+# dbmigrate project configuration
+
+[migrations]
+directory = "migrations"

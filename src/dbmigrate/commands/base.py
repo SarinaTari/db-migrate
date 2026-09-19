@@ -1,4 +1,4 @@
-"""Foundational command abstractions for the dbmigrate CLI."""
+"""Foundational command definitions for the dbmigrate CLI."""
 
 from __future__ import annotations
 

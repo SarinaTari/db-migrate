@@ -73,11 +73,29 @@ def test_resolve_unknown_command() -> None:
     assert resolve_command("does-not-exist") is None
 
 
-def test_main_with_command_returns_success(capsys) -> None:
-    """A recognized command should currently return successfully."""
-    exit_code = main(["status"])
+def test_init_does_not_require_configuration(
+    capsys,
+) -> None:
+    """The placeholder init command should work without a config."""
+    exit_code = main(["init"])
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "not implemented yet" in captured.out
+    assert "later phase" in captured.out
+
+
+def test_project_command_requires_configuration(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    """Project-dependent commands should report configuration errors."""
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(["status"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Configuration error" in captured.out

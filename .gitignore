@@ -1,12 +1,13 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.pyo
 
 # Virtual environments
 .venv/
 venv/
 env/
+ENV/
 
 # Packaging
 build/
@@ -17,13 +18,13 @@ dist/
 .pytest_cache/
 .coverage
 htmlcov/
+.coverage.*
 
-# Type checking
+# Linters and type checkers
 .mypy_cache/
-.pyright/
-
-# Linters / formatters
 .ruff_cache/
+.pyre/
+.pytype/
 
 # IDEs
 .vscode/
@@ -32,7 +33,7 @@ htmlcov/
 # macOS
 .DS_Store
 
-# Environment / secrets
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
@@ -42,9 +43,12 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
+# dbmigrate local project configuration
+dbmigrate.toml
+
 # Temporary files
 *.tmp
-*.log
+*.temp
 
-# Project-specific runtime files
-.dbmigrate/
+# Runtime files
+*.log

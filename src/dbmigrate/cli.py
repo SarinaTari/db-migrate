@@ -7,6 +7,7 @@ from typing import Sequence
 
 from . import __version__
 from .commands.base import Command, get_commands
+from .config import ConfigurationError, load_config
 
 
 DESCRIPTION = (
@@ -44,23 +45,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_command(command: Command | None) -> int:
-    """Execute a parsed command.
-
-    Command behavior is intentionally not implemented yet.
-    Later phases will replace these placeholders with real services.
-    """
-    if command is None:
-        return 0
-
-    print(
-        f"Command '{command.name}' is not implemented yet. "
-        "This command will be introduced in a later phase."
-    )
-
-    return 0
-
-
 def resolve_command(command_name: str | None) -> Command | None:
     """Resolve a command name to its command definition."""
     if command_name is None:
@@ -71,6 +55,38 @@ def resolve_command(command_name: str | None) -> Command | None:
             return command
 
     return None
+
+
+def run_command(command: Command | None) -> int:
+    """Execute a parsed command.
+
+    Command behavior is intentionally limited at this stage.
+    Configuration-aware commands will be implemented incrementally.
+    """
+    if command is None:
+        return 0
+
+    if command.name == "init":
+        print(
+            "The init command will be implemented in a later phase."
+        )
+        return 0
+
+    try:
+        config = load_config()
+    except ConfigurationError as exc:
+        print(f"Configuration error: {exc}")
+        return 1
+
+    print(
+        f"Project: {config.project_root}"
+    )
+    print(
+        f"Command '{command.name}' is not implemented yet. "
+        "This command will be introduced in a later phase."
+    )
+
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

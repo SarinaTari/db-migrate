@@ -58,9 +58,9 @@ available functionality.
 
 ## Current Status
 
-The project is currently in **Phase 2 — CLI Foundation**.
+The project is currently in **Phase 3 — Configuration**.
 
-### Phase 0
+### Phase 0 — Database Migration Concepts
 
 Established:
 
@@ -71,7 +71,7 @@ Established:
 - reproducibility principles
 - project scope
 
-### Phase 1
+### Phase 1 — Professional Python Project
 
 Established:
 
@@ -83,7 +83,7 @@ Established:
 - pytest configuration
 - initial automated tests
 
-### Phase 2
+### Phase 2 — CLI Foundation
 
 Established:
 
@@ -95,19 +95,62 @@ Established:
 - command-specific help
 - CLI tests
 
+### Phase 3 — Configuration
+
+Established:
+
+- project configuration
+- TOML configuration loading
+- project-root discovery
+- configurable migration directory
+- configuration validation
+- configuration-specific errors
+
 The migration engine has not been implemented yet.
 
 ---
 
-## CLI
+## Configuration
 
-The current CLI supports:
+A dbmigrate project uses:
 
 ```text
+dbmigrate.toml
+
+A minimal configuration is:
+
+[migrations]
+directory = "migrations"
+
+The directory setting is optional and defaults to:
+
+migrations
+
+The configuration file is discovered by searching upward from the current
+working directory.
+
+For example:
+
+my-project/
+├── dbmigrate.toml
+├── migrations/
+└── src/
+    └── application/
+
+Running:
+
+dbmigrate status
+
+from inside src/application/ will locate the project's configuration.
+
+CLI
+
+Global commands:
+
 dbmigrate --help
 dbmigrate --version
 
-The planned command interface is also registered:
+The planned command interface is:
 
 dbmigrate init
 dbmigrate create
@@ -128,35 +171,28 @@ dbmigrate doctor
 dbmigrate check
 dbmigrate verify-schema
 
-These commands are currently placeholders.
+The commands are currently placeholders except for the configuration-aware
+CLI foundation.
 
-For example:
-
-$ dbmigrate status
-
-Command 'status' is not implemented yet. This command will be introduced in
-a later phase.
-
-The commands are registered now so that their interface can be developed
-incrementally without redesigning the CLI.
+Only implemented behavior will be documented as available functionality.
 
 Architecture
 
-The current CLI architecture is:
+The current architecture is:
 
 User
  |
  v
-dbmigrate
+CLI
  |
  v
 Argument Parser
  |
  v
-Command Resolution
+Command Layer
  |
  v
-Command Handler
+Configuration
 
 The intended application architecture will eventually become:
 
@@ -292,10 +328,6 @@ Install the project with development dependencies:
 python -m pip install -e ".[dev]"
 Running the CLI
 
-After installation:
-
-dbmigrate --help
-
 Check the version:
 
 dbmigrate --version
@@ -304,9 +336,12 @@ Expected:
 
 dbmigrate 0.1.0
 
-Check command-specific help:
+Show help:
 
-dbmigrate status --help
+dbmigrate --help
+
+Project-dependent commands require a dbmigrate.toml configuration file.
+
 Running Tests
 
 Run the complete test suite:
@@ -322,6 +357,7 @@ db-migrate/
 ├── LICENSE
 ├── .gitignore
 ├── pyproject.toml
+├── dbmigrate.toml.example
 │
 ├── docs/
 │   ├── architecture.md
@@ -329,7 +365,8 @@ db-migrate/
 │   ├── migration-lifecycle.md
 │   ├── phase-0.md
 │   ├── phase-1.md
-│   └── phase-2.md
+│   ├── phase-2.md
+│   └── phase-3.md
 │
 ├── migrations/
 │   └── .gitkeep
@@ -338,19 +375,21 @@ db-migrate/
 │   └── dbmigrate/
 │       ├── __init__.py
 │       ├── cli.py
+│       ├── config.py
 │       └── commands/
 │           ├── __init__.py
 │           └── base.py
 │
 └── tests/
     ├── test_cli.py
-    └── test_commands.py
+    ├── test_commands.py
+    └── test_config.py
 Roadmap
 Phase 0  Database Migration Concepts                 ✓
 Phase 1  Professional Python Project               ✓
 Phase 2  CLI Foundation                             ✓
-Phase 3  Configuration                              →
-Phase 4  Migration Format
+Phase 3  Configuration                              ✓
+Phase 4  Migration Format                            →
 Phase 5  Discovery and Validation
 Phase 6  Database Interface + SQLite
 Phase 7  Migration History
@@ -383,4 +422,3 @@ Phase 33 Portfolio Finalization
 License
 
 This project is licensed under the MIT License.
-
