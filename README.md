@@ -1,250 +1,83 @@
 # db-migrate
 
-A Python-based database migration and schema-evolution CLI focused on
-safety, integrity, and explainability.
+A Python-based database migration and schema-evolution CLI focused on safety, integrity, explainability, and migration analysis.
 
-The project is being built from scratch as a serious software-engineering
-project rather than as a simple migration script.
+## Project Status
+
+**Current phase: Phase 4 — Migration Format**
+
+The project is being developed as a serious portfolio-quality software engineering project.
+
+The current implementation provides:
+
+- Professional Python project structure
+- `dbmigrate` command-line interface
+- Project configuration
+- Automatic project-root discovery
+- Migration file format
+- Migration parsing
+- Migration validation
+- Migration discovery
+- Deterministic migration ordering
+- Duplicate migration-version detection
+- Automated tests
+
+Database execution has not been implemented yet.
+
+SQLite will be introduced in Phase 6.
 
 ---
 
 ## Project Goal
 
-`db-migrate` is designed to manage versioned database schema changes while
-making migrations understandable, testable, reproducible, and safe.
+`db-migrate` is designed to manage database schema evolution through versioned migration files.
 
-The project will begin with SQLite and later introduce PostgreSQL and MySQL.
+Instead of manually applying schema changes, developers will eventually be able to use commands such as:
 
-The long-term goal is not simply to execute SQL files.
-
-The tool will provide:
-
-- migration discovery
-- migration validation
-- migration execution
-- rollback
-- migration history
-- integrity verification
-- checksums
-- migration planning
-- migration linting
-- migration explanation
-- schema inspection
-- schema comparison
-- schema fingerprints
-- reproducibility checks
-- impact analysis
-- safety diagnostics
-- CI-oriented validation
-
-Only features that have actually been implemented will be advertised as
-available functionality.
-
----
-
-## Project Identity
-
-| Item | Value |
-|---|---|
-| Repository | `db-migrate` |
-| Python package | `dbmigrate` |
-| CLI | `dbmigrate` |
-| Language | Python |
-| Initial database | SQLite |
-| Later databases | PostgreSQL, MySQL |
-| License | MIT |
-
----
-
-## Current Status
-
-The project is currently in **Phase 3 — Configuration**.
-
-### Phase 0 — Database Migration Concepts
-
-Established:
-
-- database migration concepts
-- migration lifecycle
-- architecture
-- safety principles
-- reproducibility principles
-- project scope
-
-### Phase 1 — Professional Python Project
-
-Established:
-
-- Python package
-- `src/` layout
-- packaging configuration
-- CLI entry point
-- version handling
-- pytest configuration
-- initial automated tests
-
-### Phase 2 — CLI Foundation
-
-Established:
-
-- top-level CLI parser
-- CLI subcommands
-- command registry
-- command resolution
-- command dispatch
-- command-specific help
-- CLI tests
-
-### Phase 3 — Configuration
-
-Established:
-
-- project configuration
-- TOML configuration loading
-- project-root discovery
-- configurable migration directory
-- configuration validation
-- configuration-specific errors
-
-The migration engine has not been implemented yet.
-
----
-
-## Configuration
-
-A dbmigrate project uses:
-
-```text
-dbmigrate.toml
-
-A minimal configuration is:
-
-[migrations]
-directory = "migrations"
-
-The directory setting is optional and defaults to:
-
-migrations
-
-The configuration file is discovered by searching upward from the current
-working directory.
-
-For example:
-
-my-project/
-├── dbmigrate.toml
-├── migrations/
-└── src/
-    └── application/
-
-Running:
-
-dbmigrate status
-
-from inside src/application/ will locate the project's configuration.
-
-CLI
-
-Global commands:
-
-dbmigrate --help
-dbmigrate --version
-
-The planned command interface is:
-
-dbmigrate init
-dbmigrate create
+```bash
+dbmigrate create add_email_to_users
 dbmigrate up
 dbmigrate down
 dbmigrate status
 dbmigrate history
-dbmigrate current
-dbmigrate validate
 dbmigrate plan
-dbmigrate lint
-dbmigrate explain
-dbmigrate impact
-dbmigrate schema
-dbmigrate schema-diff
-dbmigrate fingerprint
-dbmigrate doctor
-dbmigrate check
-dbmigrate verify-schema
 
-The commands are currently placeholders except for the configuration-aware
-CLI foundation.
+The project will progressively add:
 
-Only implemented behavior will be documented as available functionality.
+migration execution
+rollback
+migration history
+checksums
+transactions
+dry-run planning
+migration linting
+migration explanation
+impact analysis
+schema inspection
+schema fingerprints
+schema diffing
+reproducibility checks
+SQLite support
+PostgreSQL support
+MySQL support
+locking and concurrency protection
+CI-oriented validation
+project diagnostics
 
-Architecture
-
-The current architecture is:
-
-User
- |
- v
-CLI
- |
- v
-Argument Parser
- |
- v
-Command Layer
- |
- v
-Configuration
-
-The intended application architecture will eventually become:
-
-CLI
- |
- v
-Command Layer
- |
- v
-Migration Service
- |
- +--> Discovery
- |
- +--> Planning
- |
- +--> Validation
- |
- +--> Execution
- |
- +--> History
- |
- +--> Integrity
- |
- v
-Database Interface
- |
- +--> SQLite
- +--> PostgreSQL
- +--> MySQL
-
-Additional analysis layers will eventually provide:
-
-Migration Analysis
- |
- +--> Linter
- +--> Explainer
- +--> Impact Analyzer
-
-Schema Analysis
- |
- +--> Inspector
- +--> Diff
- +--> Fingerprint
- +--> Reproducibility
-
-The architecture will evolve as implementation reveals real requirements.
-
-The project deliberately avoids unnecessary abstraction before it is justified.
+Only implemented features will be advertised as available.
 
 Migration Model
 
-The planned migration format is:
+A migration represents one versioned change to a database schema.
+
+A migration contains:
+
+migration version
+migration name
+up SQL
+down SQL
+
+Example:
 
 -- migration: 001
 -- name: create_users
@@ -260,102 +93,258 @@ CREATE TABLE users (
 
 DROP TABLE users;
 
-Migrations will be versioned and applied in a deterministic order.
+The up section describes how to apply the migration.
 
-The migration history will eventually be tracked inside the target database.
+The down section describes how to reverse it.
 
-A conceptual history table is:
+Migration Filenames
 
-CREATE TABLE schema_migrations (
-    version INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    checksum TEXT NOT NULL,
-    applied_at TIMESTAMP NOT NULL
-);
+Migration files use the following convention:
 
-The actual implementation will be introduced in later phases.
+<version>_<name>.sql
 
-Safety Principles
+Examples:
 
-Database migration software can modify important persistent state.
+001_create_users.sql
+002_add_email.sql
+003_create_posts.sql
 
-The project therefore prioritizes:
+Names use lowercase letters, numbers, underscores, and hyphens.
 
-deterministic execution
-transaction safety where supported
-explicit planning
-dry-run behavior
-validation
-migration checksums
-history integrity
-failure visibility
-reproducibility
-clear error messages
-conservative behavior
+Migration versions must be positive integers.
 
-The tool should prefer making potentially dangerous behavior visible before
-performing it.
+Migration Metadata
 
-Development Philosophy
+The filename and internal metadata must agree.
 
-The project is being developed incrementally.
+For example:
 
-Each phase should:
+001_create_users.sql
 
-introduce a coherent capability
-explain the underlying engineering concept
-implement the capability
-test the implementation
-document the result
-leave the repository in a working state
+must contain:
 
-The project should not become a collection of unrelated features.
+-- migration: 001
+-- name: create_users
 
+This prevents a migration from accidentally identifying itself differently from its filename.
+
+Migration Sections
+
+Every migration must contain exactly one:
+
+-- +up
+
+and exactly one:
+
+-- +down
+
+The order must be:
+
+metadata
+
+-- +up
+
+UP SQL
+
+-- +down
+
+DOWN SQL
+
+Both SQL sections must contain content.
+
+Phase 4 Architecture
+
+Migration processing currently follows:
+
+Migration Directory
+        │
+        ↓
+File Discovery
+        │
+        ↓
+Filename Validation
+        │
+        ↓
+Metadata Parsing
+        │
+        ↓
+Section Parsing
+        │
+        ↓
+Migration Object
+        │
+        ↓
+Migration Collection
+
+The resulting migration objects are immutable domain objects.
+
+Configuration
+
+Project configuration is stored in:
+
+dbmigrate.toml
+
+Example:
+
+[migrations]
+directory = "migrations"
+
+A template is provided:
+
+dbmigrate.toml.example
+
+Local dbmigrate.toml files are ignored by Git because they may eventually contain environment-specific database configuration.
+
+CLI
+
+The CLI is already established, but most commands are intentionally placeholders until their corresponding phases.
+
+dbmigrate --help
+dbmigrate --version
+
+Available command names include:
+
+init
+create
+up
+down
+status
+history
+current
+validate
+plan
+lint
+explain
+impact
+schema
+schema-diff
+fingerprint
+doctor
+check
+verify-schema
+
+The commands will be implemented progressively.
+
+Current Limitations
+
+Phase 4 does not yet:
+
+connect to a database
+execute SQL
+create a migration history table
+apply migrations
+roll back migrations
+calculate migration checksums
+inspect a database schema
+support SQLite execution
+support PostgreSQL
+support MySQL
+
+These features belong to later phases.
+
+Architecture Direction
+
+The intended architecture is:
+
+CLI
+ │
+ ↓
+Command Layer
+ │
+ ↓
+Migration Service
+ │
+ ├── Discovery
+ ├── Parsing
+ ├── Validation
+ └── Planning
+ │
+ ↓
+Execution
+ │
+ ↓
+History / Integrity
+ │
+ ↓
+Database Interface
+ │
+ ├── SQLite
+ ├── PostgreSQL
+ └── MySQL
+
+Analysis capabilities will eventually sit alongside the migration engine:
+
+Migration Analysis
+├── Linter
+├── Explainer
+└── Impact Analyzer
+
+Schema Analysis
+├── Schema Inspector
+├── Schema Diff
+├── Fingerprint
+└── Reproducibility Checks
+Safety Philosophy
+
+The project is designed around several principles:
+
+validate before execution
+make migration order explicit
+never silently ignore malformed migrations
+preserve migration history
+detect modified migrations
+use transactions where supported
+provide dry-run and planning capabilities
+distinguish database capabilities
+make potentially dangerous operations visible
+prefer explicit failure over silent corruption
+Testing
+
+The project uses pytest.
+
+Run:
+
+pytest
+
+The Phase 4 tests cover:
+
+migration filename parsing
+migration metadata parsing
+version consistency
+name consistency
+up section validation
+down section validation
+empty-section detection
+section ordering
+migration discovery
+migration ordering
+duplicate versions
+invalid paths
+non-SQL files
+configuration
+CLI behavior
 Development Setup
-
-Python 3.12 or newer is required.
 
 Create a virtual environment:
 
 python3 -m venv .venv
 
-Activate it on macOS/Linux:
+Activate it:
 
 source .venv/bin/activate
 
-Install the project with development dependencies:
+Install the project in editable mode:
 
 python -m pip install -e ".[dev]"
-Running the CLI
 
-Check the version:
-
-dbmigrate --version
-
-Expected:
-
-dbmigrate 0.1.0
-
-Show help:
-
-dbmigrate --help
-
-Project-dependent commands require a dbmigrate.toml configuration file.
-
-Running Tests
-
-Run the complete test suite:
+Run the tests:
 
 pytest
-
-or:
-
-python -m pytest
 Project Structure
 db-migrate/
-├── README.md
-├── LICENSE
 ├── .gitignore
+├── LICENSE
+├── README.md
 ├── pyproject.toml
 ├── dbmigrate.toml.example
 │
@@ -366,7 +355,8 @@ db-migrate/
 │   ├── phase-0.md
 │   ├── phase-1.md
 │   ├── phase-2.md
-│   └── phase-3.md
+│   ├── phase-3.md
+│   └── phase-4.md
 │
 ├── migrations/
 │   └── .gitkeep
@@ -376,6 +366,7 @@ db-migrate/
 │       ├── __init__.py
 │       ├── cli.py
 │       ├── config.py
+│       ├── migration.py
 │       └── commands/
 │           ├── __init__.py
 │           └── base.py
@@ -383,42 +374,45 @@ db-migrate/
 └── tests/
     ├── test_cli.py
     ├── test_commands.py
-    └── test_config.py
+    ├── test_config.py
+    └── test_migration.py
 Roadmap
-Phase 0  Database Migration Concepts                 ✓
-Phase 1  Professional Python Project               ✓
-Phase 2  CLI Foundation                             ✓
-Phase 3  Configuration                              ✓
-Phase 4  Migration Format                            →
-Phase 5  Discovery and Validation
-Phase 6  Database Interface + SQLite
-Phase 7  Migration History
-Phase 8  Migration Runner
-Phase 9  Transaction and Failure Semantics
-Phase 10 Down/Rollback
-Phase 11 Status/History/Current
-Phase 12 Create Command
-Phase 13 Validation
-Phase 14 Checksums
-Phase 15 Dry Run and Planning
-Phase 16 Migration Linter
-Phase 17 Explain and Impact
-Phase 18 Schema Inspection/Fingerprints
-Phase 19 Schema Diff/Reproducibility
-Phase 20 Database Abstraction Review
-Phase 21 PostgreSQL
-Phase 22 MySQL
-Phase 23 SQL Dialect/Capability System
-Phase 24 Locking/Concurrency
-Phase 25 Safety and Doctor
-Phase 26 CI Mode
-Phase 27 Logging
-Phase 28 Performance
-Phase 29 Full Integration Testing
-Phase 30 Architecture Review
-Phase 31 Documentation
-Phase 32 Example Project
-Phase 33 Portfolio Finalization
-License
+Phase 0   Database Migration Concepts             ✓
+Phase 1   Professional Python Project             ✓
+Phase 2   CLI Foundation                          ✓
+Phase 3   Configuration                           ✓
+Phase 4   Migration Format                        ✓
+Phase 5   Discovery and Validation                →
+Phase 6   Database Interface + SQLite
+Phase 7   Migration History
+Phase 8   Migration Runner
+Phase 9   Transaction and Failure Semantics
+Phase 10  Down / Rollback
+Phase 11  Status / History / Current
+Phase 12  Create Command
+Phase 13  Validation
+Phase 14  Checksums
+Phase 15  Dry Run and Planning
+Phase 16  Migration Linter
+Phase 17  Explain and Impact
+Phase 18  Schema Inspection / Fingerprints
+Phase 19  Schema Diff / Reproducibility
+Phase 20  Database Abstraction Review
+Phase 21  PostgreSQL
+Phase 22  MySQL
+Phase 23  SQL Dialect / Capability System
+Phase 24  Locking / Concurrency
+Phase 25  Safety and Doctor
+Phase 26  CI Mode
+Phase 27  Logging
+Phase 28  Performance
+Phase 29  Full Integration Testing
+Phase 30  Architecture Review
+Phase 31  Documentation
+Phase 32  Example Project
+Phase 33  Portfolio Finalization
+Portfolio Description
 
-This project is licensed under the MIT License.
+db-migrate is a Python-based database migration and schema-evolution CLI designed to manage versioned database changes with an emphasis on safety, integrity, explainability, and migration analysis.
+
+As development progresses, the project will support SQLite, PostgreSQL, and MySQL while maintaining a database-independent migration architecture.

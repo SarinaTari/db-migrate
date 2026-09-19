@@ -1,413 +1,167 @@
 # Architecture
 
-## 1. Purpose
+## Overview
 
-This document defines the initial architectural direction for the database migration tool.
+`db-migrate` is designed as a layered database migration and schema-evolution system.
 
-This is a **conceptual architecture**, not a final implementation.
-
-The architecture is expected to evolve as real requirements appear.
+The architecture separates command-line interaction, migration management, database execution, and analysis.
 
 ---
 
-# 2. High-Level Architecture
+## Current Architecture
 
-The planned system is:
-
-```text
-                    ┌───────────────┐
-                    │      CLI      │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │ Command Layer │
-                    └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │   Migration   │
-                    │    Service    │
-                    └───────┬───────┘
-                            │
-          ┌─────────────────┼─────────────────┐
-          │                 │                 │
-          ▼                 ▼                 ▼
-    ┌──────────┐      ┌──────────┐      ┌──────────┐
-    │Discovery │      │ Planning │      │Validation│
-    └──────────┘      └──────────┘      └──────────┘
-          │                 │                 │
-          └─────────────────┼─────────────────┘
-                            ▼
-                    ┌───────────────┐
-                    │   Execution   │
-                    └───────┬───────┘
-                            │
-                 ┌──────────┴──────────┐
-                 ▼                     ▼
-          ┌────────────┐        ┌────────────┐
-          │  History   │        │ Integrity  │
-          └────────────┘        └────────────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │   Database    │
-                    │   Interface   │
-                    └───────┬───────┘
-                            │
-              ┌─────────────┼─────────────┐
-              ▼             ▼             ▼
-          ┌───────┐    ┌──────────┐   ┌───────┐
-          │SQLite │    │PostgreSQL│   │ MySQL │
-          └───────┘    └──────────┘   └───────┘
-```
-
----
-
-# 3. CLI Layer
-
-The CLI is responsible for:
-
-* parsing arguments
-* selecting commands
-* displaying results
-* returning appropriate exit codes
-
-It should not contain the migration engine itself.
-
-For example:
+At Phase 4, the implemented architecture is:
 
 ```text
 CLI
  │
- └── calls application/service layer
-```
+ ↓
+Command Definitions
+ │
+ ↓
+Configuration
+ │
+ ↓
+Migration Discovery
+ │
+ ↓
+Migration Parser
+ │
+ ↓
+Migration Domain Model
 
-rather than:
+Database execution has not yet been introduced.
 
-```text
+Planned Architecture
+
+The target architecture is:
+
 CLI
  │
- └── directly executes SQL everywhere
-```
-
----
-
-# 4. Migration Service
-
-The migration service coordinates the migration workflow.
-
-Conceptually:
-
-```text
+ ↓
+Command Layer
+ │
+ ↓
 Migration Service
-├── discover
-├── validate
-├── determine state
-├── plan
-├── execute
-└── record history
-```
-
-It should coordinate these operations rather than implementing every database-specific detail itself.
-
----
-
-# 5. Migration Discovery
-
-Discovery is responsible for finding migration files.
-
-Input:
-
-```text
-migrations/
-```
-
-Output:
-
-```text
-Migration objects
-```
-
-For example:
-
-```text
-001_create_users.sql
-002_add_email.sql
-003_create_projects.sql
-```
-
-becomes:
-
-```text
-[
-    Migration(...),
-    Migration(...),
-    Migration(...)
-]
-```
-
----
-
-# 6. Migration Representation
-
-The system should have an internal representation of a migration.
-
-Conceptually:
-
-```text
-Migration
-├── version
-├── name
-├── path
-├── up_sql
-├── down_sql
-└── checksum
-```
-
-This prevents the rest of the application from repeatedly parsing raw files.
-
----
-
-# 7. Database Interface
-
-The migration engine should interact with an abstraction rather than directly depending on one database implementation.
-
-Conceptually:
-
-```text
-Database
-    │
-    ├── SQLiteDatabase
-    ├── PostgreSQLDatabase
-    └── MySQLDatabase
-```
-
-The exact interface will be determined when implementation begins.
-
----
-
-# 8. Why an Interface?
-
-Without an abstraction, the migration engine could become:
-
-```python
-if database == "sqlite":
-    ...
-elif database == "postgres":
-    ...
-elif database == "mysql":
-    ...
-```
-
-repeated throughout the application.
-
-That would make the code difficult to maintain.
-
-Instead, the migration engine should ask for operations conceptually such as:
-
-```text
-connect
-execute
-begin
-commit
-rollback
-query
-close
-```
-
-while the adapter handles database-specific implementation.
-
----
-
-# 9. Do Not Overabstract
-
-The architecture should not create abstractions merely because they sound sophisticated.
-
-For example, if there is no real need for:
-
-```text
-AbstractDatabaseFactoryProvider
-```
-
-then it should not exist.
-
-The rule is:
-
-> Introduce an abstraction when it solves a real problem.
-
----
-
-# 10. Migration History
-
-Migration history is responsible for answering:
-
-```text
-Which migrations have been applied?
-```
-
-It will eventually use a database table similar to:
-
-```sql
-schema_migrations
-```
-
-The history component should be separate from filesystem migration discovery.
-
----
-
-# 11. Integrity
-
-Integrity functionality will eventually handle:
-
-```text
-migration checksums
-schema fingerprints
-consistency verification
-```
-
-This allows the tool to detect mismatches between:
-
-```text
-migration source
-```
-
-and:
-
-```text
-database state
-```
-
----
-
-# 12. Analysis Layer
-
-Later features will analyze migrations without executing them.
-
-Conceptually:
-
-```text
-Migration
-    │
-    ├── Linter
-    ├── Explainer
-    └── Impact Analyzer
-```
-
-These components should not silently modify the database.
-
----
-
-# 13. Schema Layer
-
-Later the system will inspect actual database schemas.
-
-Conceptually:
-
-```text
-Database
-    │
-    ▼
-Schema Inspector
-    │
-    ├── Schema representation
-    ├── Schema diff
-    └── Schema fingerprint
-```
-
-This will support reproducibility and drift detection.
-
----
-
-# 14. Doctor
-
-The doctor command will eventually coordinate diagnostics from multiple components:
-
-```text
-Doctor
-├── configuration
-├── migration files
-├── ordering
-├── database connection
-├── history
-├── checksums
-└── schema
-```
-
-The doctor should primarily diagnose.
-
-It should not automatically modify a user's database without an explicit operation.
-
----
-
-# 15. Dependency Direction
-
-The desired dependency direction is approximately:
-
-```text
-CLI
+ │
+ ├── Discovery
+ ├── Parsing
+ ├── Validation
+ └── Planning
+ │
  ↓
-Application / Services
+Execution Layer
+ │
  ↓
-Domain / Migration Models
+History / Integrity
+ │
  ↓
-Database Abstraction
- ↓
-Database Adapter
-```
+Database Interface
+ │
+ ├── SQLite
+ ├── PostgreSQL
+ └── MySQL
 
-The lower-level components should not depend on the CLI.
+Analysis components will eventually include:
 
-For example:
+Analysis
+├── Linter
+├── Explainer
+└── Impact Analyzer
 
-```text
-SQLite adapter
-```
+Schema
+├── Inspector
+├── Diff
+├── Fingerprint
+└── Reproducibility
+Design Principles
+Separation of responsibilities
 
-should not know whether it was called from:
+Each layer should have one primary responsibility.
 
-```bash
-dbmigrate up
-```
+The CLI should not contain SQL execution logic.
 
-or:
+The parser should not connect to databases.
 
-```bash
-dbmigrate doctor
-```
+The database abstraction should not parse command-line arguments.
 
----
+Explicit failure
 
-# 16. Architecture Evolution
+Invalid migration files should fail clearly rather than being silently ignored.
 
-This architecture is intentionally not frozen.
+Deterministic behavior
 
-As implementation progresses, we will ask:
+Migration discovery and ordering must be deterministic.
 
-```text
-Does this abstraction solve a real problem?
+Migration version numbers define execution order.
 
-Does this module have one clear responsibility?
+Database independence
 
-Is database-specific behavior isolated?
+The migration engine should not be tightly coupled to a single database backend.
 
-Is the CLI becoming too complicated?
+SQLite will be implemented first, but the architecture is intended to support PostgreSQL and MySQL later.
 
-Can this component be tested independently?
-```
+Safety first
 
-The architecture should be refined based on actual implementation experience.
+The project will eventually prioritize:
 
----
+validation
+transactions
+checksums
+dry runs
+planning
+locking
+integrity verification
 
-# 17. Phase 0 Decision
+before introducing advanced automation.
 
-At the end of Phase 0:
+Current Modules
+cli.py
 
-```text
-No migration execution engine exists.
-```
+Responsible for:
 
-The architecture and domain model are defined conceptually.
+argument parsing
+command resolution
+command dispatch
+config.py
 
-Implementation begins in Phase 1.
+Responsible for:
+
+project discovery
+configuration loading
+configuration validation
+migration.py
+
+Responsible for:
+
+migration representation
+migration filename parsing
+migration metadata parsing
+migration section parsing
+migration discovery
+commands/base.py
+
+Contains the command registry and command metadata.
+
+Future Modules
+
+Expected future responsibilities include:
+
+database/
+    base.py
+    sqlite.py
+    postgres.py
+    mysql.py
+
+history.py
+runner.py
+planner.py
+validator.py
+checksum.py
+schema.py
+lint.py
+explain.py
+impact.py
+doctor.py
+
+The exact module boundaries may evolve as the implementation grows.

@@ -1,14 +1,13 @@
-"""Foundational command definitions for the dbmigrate CLI."""
+"""Base command definitions for the dbmigrate CLI."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
 
 
 @dataclass(frozen=True)
 class Command:
-    """Describe a command exposed by the CLI."""
+    """Description of a dbmigrate CLI command."""
 
     name: str
     help: str
@@ -17,7 +16,7 @@ class Command:
 COMMANDS: tuple[Command, ...] = (
     Command(
         name="init",
-        help="Initialize a migration project.",
+        help="Initialize a new dbmigrate project.",
     ),
     Command(
         name="create",
@@ -29,7 +28,7 @@ COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         name="down",
-        help="Roll back migrations.",
+        help="Roll back the latest applied migration.",
     ),
     Command(
         name="status",
@@ -37,7 +36,7 @@ COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         name="history",
-        help="Show migration history.",
+        help="Show migration execution history.",
     ),
     Command(
         name="current",
@@ -57,7 +56,7 @@ COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         name="explain",
-        help="Explain a migration.",
+        help="Explain what a migration does.",
     ),
     Command(
         name="impact",
@@ -81,15 +80,15 @@ COMMANDS: tuple[Command, ...] = (
     ),
     Command(
         name="check",
-        help="Run migration safety checks.",
+        help="Run project consistency checks.",
     ),
     Command(
         name="verify-schema",
-        help="Verify schema reproducibility.",
+        help="Verify the database schema against migrations.",
     ),
 )
 
 
-def get_commands() -> Sequence[Command]:
-    """Return the commands exposed by the CLI."""
+def get_commands() -> tuple[Command, ...]:
+    """Return all registered CLI commands."""
     return COMMANDS

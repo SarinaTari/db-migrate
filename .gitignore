@@ -1,7 +1,10 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Virtual environments
 .venv/
@@ -9,22 +12,16 @@ venv/
 env/
 ENV/
 
-# Packaging
+# Build artifacts
 build/
 dist/
 *.egg-info/
 
-# Testing
-.pytest_cache/
+# Coverage
 .coverage
-htmlcov/
 .coverage.*
-
-# Linters and type checkers
-.mypy_cache/
-.ruff_cache/
-.pyre/
-.pytype/
+htmlcov/
+.pytest_cache/
 
 # IDEs
 .vscode/
@@ -33,7 +30,10 @@ htmlcov/
 # macOS
 .DS_Store
 
-# Environment variables and secrets
+# Local configuration
+dbmigrate.toml
+
+# Environment and secrets
 .env
 .env.*
 !.env.example
@@ -43,12 +43,13 @@ htmlcov/
 *.sqlite
 *.sqlite3
 
-# dbmigrate local project configuration
-dbmigrate.toml
+# Logs
+*.log
 
 # Temporary files
 *.tmp
 *.temp
 
-# Runtime files
-*.log
+# Migration project placeholders
+!migrations/.gitkeep
+!tests/.gitkeep

@@ -1,48 +1,12 @@
-"""Tests for the dbmigrate command-line interface."""
+"""Tests for the dbmigrate CLI."""
 
 from __future__ import annotations
-
-import pytest
 
 from dbmigrate import __version__
 from dbmigrate.cli import build_parser, main, resolve_command
 
 
-def test_parser_program_name() -> None:
-    """The CLI should use dbmigrate as its program name."""
-    parser = build_parser()
-
-    assert parser.prog == "dbmigrate"
-
-
-def test_version_command() -> None:
-    """The version command should exit successfully."""
-    parser = build_parser()
-
-    with pytest.raises(SystemExit) as exc_info:
-        parser.parse_args(["--version"])
-
-    assert exc_info.value.code == 0
-    assert __version__ == "0.1.0"
-
-
-def test_help_command() -> None:
-    """The help option should exit successfully."""
-    parser = build_parser()
-
-    with pytest.raises(SystemExit) as exc_info:
-        parser.parse_args(["--help"])
-
-    assert exc_info.value.code == 0
-
-
-def test_no_command_returns_success() -> None:
-    """Running the CLI without a command should succeed."""
-    assert main([]) == 0
-
-
-def test_known_command_is_parsed() -> None:
-    """A known command should be accepted by the parser."""
+def test_parser_accepts_known_command():
     parser = build_parser()
 
     args = parser.parse_args(["status"])
@@ -50,47 +14,52 @@ def test_known_command_is_parsed() -> None:
     assert args.command == "status"
 
 
-def test_unknown_command_is_rejected() -> None:
-    """Unknown commands should be rejected by argparse."""
-    parser = build_parser()
+def test_parser_accepts_version_flag(capsys):
+    try:
+        main(["--version"])
+    except SystemExit as exc:
+        assert exc.code == 0
 
-    with pytest.raises(SystemExit) as exc_info:
-        parser.parse_args(["does-not-exist"])
+    captured = capsys.readouterr()
 
-    assert exc_info.value.code != 0
+    assert f"dbmigrate {__version__}" in captured.out
 
 
-def test_resolve_known_command() -> None:
-    """Known command names should resolve to command definitions."""
+def test_parser_help(capsys):
+    try:
+        main(["--help"])
+    except SystemExit as exc:
+        assert exc.code == 0
+
+    captured = capsys.readouterr()
+
+    assert "dbmigrate" in captured.out
+    assert "status" in captured.out
+    assert "create" in captured.out
+
+
+def test_no_command_prints_help(capsys):
+    exit_code = main([])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "usage:" in captured.out
+    assert "dbmigrate" in captured.out
+
+
+def test_resolve_known_command():
     command = resolve_command("status")
 
     assert command is not None
     assert command.name == "status"
 
 
-def test_resolve_unknown_command() -> None:
-    """Unknown command names should not resolve."""
+def test_resolve_unknown_command():
     assert resolve_command("does-not-exist") is None
 
 
-def test_init_does_not_require_configuration(
-    capsys,
-) -> None:
-    """The placeholder init command should work without a config."""
-    exit_code = main(["init"])
-
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    assert "later phase" in captured.out
-
-
-def test_project_command_requires_configuration(
-    monkeypatch,
-    tmp_path,
-    capsys,
-) -> None:
-    """Project-dependent commands should report configuration errors."""
+def test_command_requires_configuration(monkeypatch, tmp_path, capsys):
     monkeypatch.chdir(tmp_path)
 
     exit_code = main(["status"])
@@ -99,3 +68,39 @@ def test_project_command_requires_configuration(
 
     assert exit_code == 1
     assert "Configuration error" in captured.out
+
+
+def test_init_does_not_require_configuration(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(["init"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "later phase" in captured.out
+
+
+def test_command_uses_project_configuration(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    (tmp_path / "dbmigrate.toml").write_text(
+        '[migrations]\ndirectory = "migrations"\n',
+        encoding="utf-8",
+    )
+
+    exit_code = main(["status"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert f"Project root: {tmp_path}" in captured.out
+    assert "status" in captured.out
