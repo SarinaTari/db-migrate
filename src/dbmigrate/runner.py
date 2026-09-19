@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 from typing import Sequence
 
+from .checksum import calculate_checksum
 from .database import Database, DatabaseError
 from .history import HistoryError, MigrationHistory
 from .migration import Migration
@@ -112,7 +112,7 @@ class MigrationRunner:
                     "is already applied."
                 )
 
-            checksum = _calculate_checksum(
+            checksum = calculate_checksum(
                 migration
             )
 
@@ -262,19 +262,3 @@ class MigrationRunner:
             )
 
         return results
-
-
-def _calculate_checksum(
-    migration: Migration,
-) -> str:
-    """Calculate a deterministic checksum for a migration."""
-    content = (
-        f"{migration.version}\n"
-        f"{migration.name}\n"
-        f"{migration.up_sql}\n"
-        f"{migration.down_sql}\n"
-    )
-
-    return hashlib.sha256(
-        content.encode("utf-8")
-    ).hexdigest()

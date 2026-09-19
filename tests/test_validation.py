@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+from dbmigrate.checksum import calculate_checksum
+from dbmigrate.history import MigrationRecord
+from dbmigrate.migration import parse_migration
 from dbmigrate.validation import validate_migrations
 
 
@@ -396,3 +399,91 @@ def test_validation_preserves_discovered_migrations_when_collection_has_errors(
         migration.version
         for migration in report.migrations
     ] == [1, 3]
+
+
+def test_validation_reports_checksum_mismatch(
+    tmp_path: Path,
+):
+    """Validation should detect a modified applied migration."""
+    path = tmp_path / "001_users.sql"
+
+    write_migration(
+        path,
+        1,
+        "users",
+    )
+
+    original = parse_migration(
+        path
+    )
+
+    record = MigrationRecord(
+        version=1,
+        name="users",
+        checksum=calculate_checksum(
+            original
+        ),
+        applied_at="2026-01-01T00:00:00+00:00",
+    )
+
+    path.write_text(
+        """
+-- migration: 001
+-- name: users
+
+-- +up
+
+CREATE TABLE users (id INTEGER PRIMARY KEY);
+
+-- +down
+
+SELECT 1;
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = validate_migrations(
+        tmp_path,
+        records=[record],
+    )
+
+    assert not report.is_valid
+    assert any(
+        "CHECKSUM_MISMATCH" in error
+        for error in report.errors
+    )
+
+
+def test_validation_accepts_matching_checksum(
+    tmp_path: Path,
+):
+    """Validation should accept an unchanged applied migration."""
+    path = tmp_path / "001_users.sql"
+
+    write_migration(
+        path,
+        1,
+        "users",
+    )
+
+    migration = parse_migration(
+        path
+    )
+
+    record = MigrationRecord(
+        version=1,
+        name="users",
+        checksum=calculate_checksum(
+            migration
+        ),
+        applied_at="2026-01-01T00:00:00+00:00",
+    )
+
+    report = validate_migrations(
+        tmp_path,
+        records=[record],
+    )
+
+    assert report.is_valid
+    assert report.errors == []

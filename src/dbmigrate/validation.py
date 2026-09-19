@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
+from .checksum import verify_migration_checksums
+from .history import MigrationRecord
 from .migration import (
     Migration,
     MigrationDiscoveryError,
@@ -151,8 +154,34 @@ def _validate_collection(
     return issues
 
 
+def _validate_checksums(
+    migrations: Sequence[Migration],
+    records: Sequence[MigrationRecord],
+) -> list[ValidationIssue]:
+    """Validate checksums of applied migrations."""
+    issues: list[ValidationIssue] = []
+
+    mismatches = verify_migration_checksums(
+        migrations,
+        records,
+    )
+
+    for mismatch in mismatches:
+        issues.append(
+            ValidationIssue(
+                code="CHECKSUM_MISMATCH",
+                message=mismatch.format(),
+                path=mismatch.migration.path,
+                version=mismatch.migration.version,
+            )
+        )
+
+    return issues
+
+
 def validate_migrations(
     directory: Path,
+    records: Sequence[MigrationRecord] | None = None,
 ) -> ValidationReport:
     """Discover and validate the migration collection."""
     try:
@@ -171,6 +200,14 @@ def validate_migrations(
     issues = _validate_collection(
         migrations
     )
+
+    if records is not None:
+        issues.extend(
+            _validate_checksums(
+                migrations,
+                records,
+            )
+        )
 
     return ValidationReport(
         migrations=list(migrations),
