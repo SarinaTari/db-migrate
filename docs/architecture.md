@@ -2,40 +2,47 @@
 
 ## Overview
 
-`db-migrate` is designed as a layered database migration and schema-evolution system.
+`db-migrate` is a layered database migration and schema-evolution system.
 
-The architecture separates command-line interaction, migration management, database execution, and analysis.
+The architecture separates:
+
+- command-line interaction
+- configuration
+- migration discovery
+- parsing
+- validation
+- execution
+- database access
+- analysis
 
 ---
 
 ## Current Architecture
 
-At Phase 4, the implemented architecture is:
+At Phase 5:
 
 ```text
 CLI
  │
  ↓
-Command Definitions
+Command Layer
  │
- ↓
-Configuration
+ ├── Configuration
  │
- ↓
+ └── Validation
+       │
+       ↓
 Migration Discovery
- │
- ↓
+       │
+       ↓
 Migration Parser
- │
- ↓
+       │
+       ↓
 Migration Domain Model
 
-Database execution has not yet been introduced.
+The database execution layer has not yet been introduced.
 
 Planned Architecture
-
-The target architecture is:
-
 CLI
  │
  ↓
@@ -50,7 +57,7 @@ Migration Service
  └── Planning
  │
  ↓
-Execution Layer
+Execution
  │
  ↓
 History / Integrity
@@ -77,75 +84,84 @@ Schema
 Design Principles
 Separation of responsibilities
 
-Each layer should have one primary responsibility.
-
-The CLI should not contain SQL execution logic.
+The CLI should coordinate operations rather than contain business logic.
 
 The parser should not connect to databases.
 
-The database abstraction should not parse command-line arguments.
+Validation should not execute SQL.
+
+Database implementations should not parse command-line arguments.
 
 Explicit failure
 
-Invalid migration files should fail clearly rather than being silently ignored.
+Invalid migrations should fail clearly.
+
+The tool should prefer explicit errors over silent behavior.
 
 Deterministic behavior
 
 Migration discovery and ordering must be deterministic.
 
-Migration version numbers define execution order.
+Version numbers define migration order.
 
 Database independence
 
-The migration engine should not be tightly coupled to a single database backend.
+The migration service should remain independent from the database backend.
 
-SQLite will be implemented first, but the architecture is intended to support PostgreSQL and MySQL later.
+SQLite will be implemented first.
 
-Safety first
+PostgreSQL and MySQL will be added later.
 
-The project will eventually prioritize:
+Safety
+
+The future execution system will prioritize:
 
 validation
+planning
 transactions
 checksums
-dry runs
-planning
 locking
-integrity verification
-
-before introducing advanced automation.
-
+integrity checks
 Current Modules
 cli.py
 
-Responsible for:
+Handles:
 
 argument parsing
 command resolution
 command dispatch
+validation output
 config.py
 
-Responsible for:
+Handles:
 
 project discovery
 configuration loading
 configuration validation
 migration.py
 
-Responsible for:
+Handles:
 
-migration representation
-migration filename parsing
-migration metadata parsing
-migration section parsing
+migration model
+filename parsing
+metadata parsing
+section parsing
 migration discovery
+validation.py
+
+Handles:
+
+project-level validation
+migration sequence checks
+duplicate-name checks
+validation reports
 commands/base.py
 
-Contains the command registry and command metadata.
+Contains command metadata and the command registry.
 
 Future Modules
 
-Expected future responsibilities include:
+Expected future components include:
 
 database/
     base.py
@@ -156,7 +172,6 @@ database/
 history.py
 runner.py
 planner.py
-validator.py
 checksum.py
 schema.py
 lint.py
@@ -164,4 +179,4 @@ explain.py
 impact.py
 doctor.py
 
-The exact module boundaries may evolve as the implementation grows.
+The exact module boundaries may evolve as the project develops.

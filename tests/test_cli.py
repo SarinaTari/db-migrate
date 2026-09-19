@@ -6,6 +6,22 @@ from dbmigrate import __version__
 from dbmigrate.cli import build_parser, main, resolve_command
 
 
+VALID_MIGRATION = """\
+-- migration: 001
+-- name: create_users
+
+-- +up
+
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY
+);
+
+-- +down
+
+DROP TABLE users;
+"""
+
+
 def test_parser_accepts_known_command():
     parser = build_parser()
 
@@ -35,7 +51,7 @@ def test_parser_help(capsys):
 
     assert "dbmigrate" in captured.out
     assert "status" in captured.out
-    assert "create" in captured.out
+    assert "validate" in captured.out
 
 
 def test_no_command_prints_help(capsys):
@@ -104,3 +120,85 @@ def test_command_uses_project_configuration(
     assert exit_code == 0
     assert f"Project root: {tmp_path}" in captured.out
     assert "status" in captured.out
+
+
+def test_validate_succeeds_for_valid_migrations(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+
+    (tmp_path / "dbmigrate.toml").write_text(
+        '[migrations]\ndirectory = "migrations"\n',
+        encoding="utf-8",
+    )
+
+    (migrations / "001_create_users.sql").write_text(
+        VALID_MIGRATION,
+        encoding="utf-8",
+    )
+
+    exit_code = main(["validate"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Validation successful" in captured.out
+    assert "001_create_users.sql" in captured.out
+
+
+def test_validate_fails_for_invalid_migrations(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+
+    (tmp_path / "dbmigrate.toml").write_text(
+        '[migrations]\ndirectory = "migrations"\n',
+        encoding="utf-8",
+    )
+
+    (migrations / "001_create_users.sql").write_text(
+        """\
+-- migration: 001
+-- name: create_users
+
+-- +up
+
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY
+);
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["validate"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Validation failed" in captured.out
+    assert "MIGRATION_PARSE_ERROR" in captured.out
+
+
+def test_validate_requires_configuration(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(["validate"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Configuration error" in captured.out

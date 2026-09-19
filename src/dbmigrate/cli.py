@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from . import __version__
 from .commands.base import Command, get_commands
 from .config import ConfigurationError, load_config
+from .validation import validate_migrations
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,14 +55,53 @@ def resolve_command(name: str | None) -> Command | None:
     return None
 
 
+def _run_validate() -> int:
+    """Run migration validation."""
+    try:
+        config = load_config()
+    except ConfigurationError as exc:
+        print(f"Configuration error: {exc}")
+        return 1
+
+    print(f"Migration directory: {config.migrations_path}")
+
+    report = validate_migrations(config.migrations_path)
+
+    if report.is_valid:
+        print(
+            f"Validation successful: "
+            f"{report.migration_count} migration(s) found."
+        )
+
+        for migration in report.migrations:
+            print(
+                f"  {migration.version:03d}_{migration.name}.sql"
+            )
+
+        return 0
+
+    print(
+        f"Validation failed: "
+        f"{len(report.issues)} issue(s) found."
+    )
+
+    for issue in report.issues:
+        print(f"  {issue.format()}")
+
+    return 1
+
+
 def run_command(command: Command) -> int:
-    """Run a command placeholder."""
+    """Run a command."""
     if command.name == "init":
         print(
             "Command 'init' is not implemented yet. "
             "This command will be introduced in a later phase."
         )
         return 0
+
+    if command.name == "validate":
+        return _run_validate()
 
     try:
         config = load_config()
