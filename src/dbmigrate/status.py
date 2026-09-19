@@ -3,91 +3,83 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
-from .history import MigrationRecord
+from .history import HistoryError, MigrationRecord
 from .migration import Migration
-
-
-@dataclass(frozen=True)
-class MigrationStatus:
-    """Describe the relationship between migration files and history."""
-
-    applied: list[Migration]
-    pending: list[Migration]
-    missing: list[MigrationRecord]
-
-    @property
-    def current(self) -> Migration | None:
-        """Return the latest applied migration file."""
-        if not self.applied:
-            return None
-
-        return self.applied[-1]
-
-    @property
-    def is_up_to_date(self) -> bool:
-        """Return whether there are no pending or missing migrations."""
-        return not self.pending and not self.missing
-
-    @property
-    def applied_count(self) -> int:
-        """Return the number of applied migrations with files."""
-        return len(self.applied)
-
-    @property
-    def pending_count(self) -> int:
-        """Return the number of pending migrations."""
-        return len(self.pending)
-
-    @property
-    def missing_count(self) -> int:
-        """Return the number of history records without files."""
-        return len(self.missing)
+from .runner import MigrationRunner, MigrationRunnerError
 
 
 class MigrationStatusError(Exception):
     """Raised when migration status cannot be determined."""
 
 
-class MigrationStatusInspector:
-    """Inspect migration files against database history."""
+@dataclass(frozen=True)
+class MigrationStatus:
+    """Describe the current migration state."""
 
-    def __init__(self, runner) -> None:
+    total_count: int
+    applied_count: int
+    pending_count: int
+    missing_count: int
+    current: Migration | None
+    pending: list[Migration]
+    missing: list[MigrationRecord]
+
+    @property
+    def is_up_to_date(self) -> bool:
+        """Return whether all known migrations are applied."""
+        return (
+            self.pending_count == 0
+            and self.missing_count == 0
+        )
+
+
+class MigrationStatusInspector:
+    """Inspect migration state using migration history."""
+
+    def __init__(
+        self,
+        runner: MigrationRunner,
+    ) -> None:
         self.runner = runner
 
     def inspect(
         self,
-        migrations: list[Migration] | tuple[Migration, ...],
+        migrations: Sequence[Migration],
     ) -> MigrationStatus:
-        """Return the current migration status."""
+        """Inspect applied, pending, and missing migrations."""
         try:
             applied = self.runner.applied(migrations)
             pending = self.runner.pending(migrations)
-        except Exception as exc:
+            history = self.runner.history.list_applied()
+        except (
+            MigrationRunnerError,
+            HistoryError,
+        ) as exc:
             raise MigrationStatusError(
-                f"Could not determine migration status: {exc}"
+                f"Could not inspect migration status: {exc}"
             ) from exc
 
-        known_versions = {
+        migration_versions = {
             migration.version
             for migration in migrations
         }
 
-        try:
-            records = self.runner.history.list_applied()
-        except Exception as exc:
-            raise MigrationStatusError(
-                f"Could not read migration history: {exc}"
-            ) from exc
-
         missing = [
             record
-            for record in records
-            if record.version not in known_versions
+            for record in history
+            if record.version not in migration_versions
         ]
 
+        current = applied[-1] if applied else None
+
         return MigrationStatus(
-            applied=applied,
-            pending=pending,
+            total_count=len(migrations),
+            applied_count=len(applied),
+            pending_count=len(pending),
+            missing_count=len(missing),
+            current=current,
+            pending=list(pending),
             missing=missing,
         )

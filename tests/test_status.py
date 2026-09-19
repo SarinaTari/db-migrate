@@ -8,10 +8,8 @@ from dbmigrate.runner import MigrationRunner
 from dbmigrate.status import MigrationStatusInspector
 
 
-def create_database(
-    tmp_path: Path,
-) -> SQLiteDatabase:
-    """Create a connected SQLite database."""
+def create_database(tmp_path: Path) -> SQLiteDatabase:
+    """Create and connect a temporary SQLite database."""
     database = SQLiteDatabase(
         tmp_path / "test.db"
     )
@@ -23,8 +21,7 @@ def make_migration(
     tmp_path: Path,
     version: int,
     name: str,
-    up_sql: str = "SELECT 1;",
-    down_sql: str = "SELECT 1;",
+    sql: str,
 ) -> Migration:
     """Create a migration object for testing."""
     path = (
@@ -32,16 +29,31 @@ def make_migration(
         / f"{version:03d}_{name}.sql"
     )
 
+    path.write_text(
+        f"""-- migration: {version}
+-- name: {name}
+
+-- +up
+
+{sql}
+
+-- +down
+
+DROP TABLE IF EXISTS {name};
+""",
+        encoding="utf-8",
+    )
+
     return Migration(
         version=version,
         name=name,
-        up_sql=up_sql,
-        down_sql=down_sql,
+        up_sql=sql.strip(),
+        down_sql=f"DROP TABLE IF EXISTS {name};",
         path=path,
     )
 
 
-def test_status_reports_pending_migrations(
+def test_status_reports_all_pending(
     tmp_path: Path,
 ) -> None:
     database = create_database(tmp_path)
@@ -51,33 +63,29 @@ def test_status_reports_pending_migrations(
             make_migration(
                 tmp_path,
                 1,
-                "first",
+                "users",
+                "CREATE TABLE users (id INTEGER);",
             ),
             make_migration(
                 tmp_path,
                 2,
-                "second",
+                "posts",
+                "CREATE TABLE posts (id INTEGER);",
             ),
         ]
 
         runner = MigrationRunner(database)
-        inspector = MigrationStatusInspector(
-            runner
-        )
+        inspector = MigrationStatusInspector(runner)
 
-        status = inspector.inspect(
-            migrations
-        )
+        status = inspector.inspect(migrations)
 
-        assert status.applied == []
-        assert [
-            migration.version
-            for migration in status.pending
-        ] == [1, 2]
-
-        assert status.missing == []
+        assert status.total_count == 2
+        assert status.applied_count == 0
+        assert status.pending_count == 2
+        assert status.missing_count == 0
         assert status.current is None
-        assert not status.is_up_to_date
+        assert len(status.pending) == 2
+        assert status.is_up_to_date is False
 
     finally:
         database.close()
@@ -93,40 +101,31 @@ def test_status_reports_applied_and_pending(
             make_migration(
                 tmp_path,
                 1,
-                "first",
+                "users",
+                "CREATE TABLE users (id INTEGER);",
             ),
             make_migration(
                 tmp_path,
                 2,
-                "second",
+                "posts",
+                "CREATE TABLE posts (id INTEGER);",
             ),
         ]
 
         runner = MigrationRunner(database)
-
         runner.apply(migrations[0])
 
-        inspector = MigrationStatusInspector(
-            runner
-        )
+        inspector = MigrationStatusInspector(runner)
 
-        status = inspector.inspect(
-            migrations
-        )
+        status = inspector.inspect(migrations)
 
-        assert [
-            migration.version
-            for migration in status.applied
-        ] == [1]
-
-        assert [
-            migration.version
-            for migration in status.pending
-        ] == [2]
-
-        assert status.current is not None
-        assert status.current.version == 1
-        assert not status.is_up_to_date
+        assert status.total_count == 2
+        assert status.applied_count == 1
+        assert status.pending_count == 1
+        assert status.missing_count == 0
+        assert status.current == migrations[0]
+        assert status.pending == [migrations[1]]
+        assert status.is_up_to_date is False
 
     finally:
         database.close()
@@ -142,32 +141,31 @@ def test_status_reports_up_to_date(
             make_migration(
                 tmp_path,
                 1,
-                "first",
+                "users",
+                "CREATE TABLE users (id INTEGER);",
             ),
             make_migration(
                 tmp_path,
                 2,
-                "second",
+                "posts",
+                "CREATE TABLE posts (id INTEGER);",
             ),
         ]
 
         runner = MigrationRunner(database)
         runner.apply_all(migrations)
 
-        inspector = MigrationStatusInspector(
-            runner
-        )
+        inspector = MigrationStatusInspector(runner)
 
-        status = inspector.inspect(
-            migrations
-        )
+        status = inspector.inspect(migrations)
 
+        assert status.total_count == 2
         assert status.applied_count == 2
         assert status.pending_count == 0
         assert status.missing_count == 0
-        assert status.current is not None
-        assert status.current.version == 2
-        assert status.is_up_to_date
+        assert status.current == migrations[1]
+        assert status.pending == []
+        assert status.is_up_to_date is True
 
     finally:
         database.close()
@@ -182,24 +180,29 @@ def test_status_detects_missing_migration_file(
         migration = make_migration(
             tmp_path,
             1,
-            "first",
+            "users",
+            "CREATE TABLE users (id INTEGER);",
         )
 
         runner = MigrationRunner(database)
         runner.apply(migration)
 
-        inspector = MigrationStatusInspector(
-            runner
-        )
+        migration.path.unlink()
+
+        inspector = MigrationStatusInspector(runner)
 
         status = inspector.inspect([])
 
-        assert status.applied == []
+        assert status.total_count == 0
+        assert status.applied_count == 0
+        assert status.pending_count == 0
+        assert status.missing_count == 1
+        assert status.current is None
         assert status.pending == []
-        assert len(status.missing) == 1
+        assert status.is_up_to_date is False
+
         assert status.missing[0].version == 1
-        assert status.missing[0].name == "first"
-        assert not status.is_up_to_date
+        assert status.missing[0].name == "users"
 
     finally:
         database.close()
@@ -215,38 +218,38 @@ def test_status_counts_are_consistent(
             make_migration(
                 tmp_path,
                 1,
-                "first",
+                "users",
+                "CREATE TABLE users (id INTEGER);",
             ),
             make_migration(
                 tmp_path,
                 2,
-                "second",
+                "posts",
+                "CREATE TABLE posts (id INTEGER);",
             ),
             make_migration(
                 tmp_path,
                 3,
-                "third",
+                "comments",
+                "CREATE TABLE comments (id INTEGER);",
             ),
         ]
 
         runner = MigrationRunner(database)
         runner.apply(migrations[0])
 
-        inspector = MigrationStatusInspector(
-            runner
-        )
+        inspector = MigrationStatusInspector(runner)
 
-        status = inspector.inspect(
-            migrations
-        )
+        status = inspector.inspect(migrations)
 
         assert (
             status.applied_count
             + status.pending_count
-            == len(migrations)
+            == status.total_count
         )
 
-        assert status.missing_count == 0
+        assert status.applied_count == 1
+        assert status.pending_count == 2
 
     finally:
         database.close()

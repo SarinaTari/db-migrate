@@ -475,7 +475,7 @@ def _run_status(config) -> int:
         print("Migration status")
         print("================")
         print(
-            f"Total migrations: {len(migrations)}"
+            f"Total migrations: {status.total_count}"
         )
         print(
             f"Applied: {status.applied_count}"
