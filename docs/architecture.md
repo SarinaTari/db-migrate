@@ -183,3 +183,34 @@ After adding:
 ```text
 src/dbmigrate/history.py
 tests/test_history.py
+
+## Migration runner
+
+The migration runner coordinates migration execution and history management.
+
+```text
+MigrationRunner
+      |
+      +---- Database
+      |
+      +---- MigrationHistory
+      |
+      +---- Migration
+
+The runner does not implement SQL parsing or database-specific connection logic.
+
+Its responsibility is orchestration:
+
+discover
+   |
+validate
+   |
+determine pending migrations
+   |
+execute in version order
+   |
+record successful migration
+
+Migration SQL and its history record are written inside the same database transaction.
+
+This prevents migration history from becoming inconsistent with actual database state.

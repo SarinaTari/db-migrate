@@ -39,6 +39,7 @@ def test_help(capsys):
     assert "dbmigrate" in captured.out
     assert "check" in captured.out
     assert "validate" in captured.out
+    assert "up" in captured.out
 
 
 def test_no_command_shows_help(capsys):
@@ -121,7 +122,7 @@ def test_check_rejects_non_sqlite_database(
     assert "supports only sqlite" in captured.err
 
 
-def test_unimplemented_command_still_dispatches(
+def test_up_with_no_migrations_reports_no_pending(
     tmp_path: Path,
     monkeypatch,
     capsys,
@@ -132,9 +133,12 @@ def test_unimplemented_command_still_dispatches(
         tmp_path / "dbmigrate.toml"
     )
 
+    (tmp_path / "migrations").mkdir()
+
     exit_code = main(["up"])
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "not implemented yet" in captured.out
+    assert "No pending migrations." in captured.out
+    assert captured.err == ""

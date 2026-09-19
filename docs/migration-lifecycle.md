@@ -32,3 +32,49 @@ A migration should only be recorded as applied after its SQL has successfully ex
 Similarly, a migration should only be removed from history after a successful rollback.
 
 This separation prevents migration history from becoming an independent source of truth disconnected from database execution.
+
+## Execution lifecycle
+
+After Phase 8, the migration lifecycle is:
+
+```text
+Migration file
+      |
+      v
+Parse
+      |
+      v
+Discover
+      |
+      v
+Validate
+      |
+      v
+Determine pending migrations
+      |
+      v
+BEGIN TRANSACTION
+      |
+      v
+Execute up SQL
+      |
+      v
+Record migration history
+      |
+      v
+COMMIT
+
+On failure:
+
+BEGIN TRANSACTION
+      |
+      v
+Execute SQL
+      |
+      X
+    ERROR
+      |
+      v
+ROLLBACK
+
+Both the schema changes and migration history record are therefore rolled back together.
