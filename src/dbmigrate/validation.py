@@ -18,7 +18,7 @@ from .migration import (
 
 @dataclass(frozen=True)
 class ValidationIssue:
-    """A single migration validation issue."""
+    """Describe a migration validation problem."""
 
     code: str
     message: str
@@ -26,24 +26,22 @@ class ValidationIssue:
     version: int | None = None
 
     def format(self) -> str:
-        """Return a human-readable representation."""
+        """Return a formatted validation message."""
         location = ""
 
         if self.path is not None:
-            location = f" [{self.path.name}]"
+            location = f" [{self.path}]"
 
-        if self.version is not None:
-            location = (
-                f" [version {self.version:03d}]"
-                + location
-            )
-
-        return f"{self.code}{location}: {self.message}"
+        return (
+            f"{self.code}: "
+            f"{self.message}"
+            f"{location}"
+        )
 
 
 @dataclass(frozen=True)
 class ValidationReport:
-    """Result of migration collection validation."""
+    """Result of validating a migration directory."""
 
     migrations: list[Migration]
     errors: list[str]
@@ -55,63 +53,63 @@ class ValidationReport:
 
     @property
     def migration_count(self) -> int:
-        """Return the number of successfully discovered migrations."""
+        """Return the number of discovered migrations."""
         return len(self.migrations)
 
 
 def _validate_version_sequence(
-    migrations: tuple[Migration, ...],
+    migrations: Sequence[Migration],
 ) -> list[ValidationIssue]:
-    """Validate that migration versions form a continuous sequence."""
-    if not migrations:
-        return []
-
+    """Validate that migration versions are sequential."""
     issues: list[ValidationIssue] = []
-    expected_version = 1
+
+    expected = 1
 
     for migration in migrations:
-        if migration.version != expected_version:
-            if migration.version > expected_version:
-                issues.append(
-                    ValidationIssue(
-                        code="MIGRATION_GAP",
-                        message=(
-                            f"Expected migration version "
-                            f"{expected_version:03d}, but found "
-                            f"{migration.version:03d}."
-                        ),
-                        path=migration.path,
-                        version=migration.version,
-                    )
-                )
-            else:
-                issues.append(
-                    ValidationIssue(
-                        code="MIGRATION_ORDER",
-                        message=(
-                            f"Migration version "
-                            f"{migration.version:03d} appears where "
-                            f"{expected_version:03d} was expected."
-                        ),
-                        path=migration.path,
-                        version=migration.version,
-                    )
-                )
+        if migration.version == expected:
+            expected += 1
+            continue
 
-        expected_version = migration.version + 1
+        if migration.version > expected:
+            issues.append(
+                ValidationIssue(
+                    code="MIGRATION_GAP",
+                    message=(
+                        f"Expected migration version "
+                        f"{expected:03d}, found "
+                        f"{migration.version:03d}."
+                    ),
+                    path=migration.path,
+                    version=migration.version,
+                )
+            )
+            expected = migration.version + 1
+            continue
+
+        issues.append(
+            ValidationIssue(
+                code="MIGRATION_ORDER",
+                message=(
+                    f"Migration version "
+                    f"{migration.version:03d} is out of order."
+                ),
+                path=migration.path,
+                version=migration.version,
+            )
+        )
 
     return issues
 
 
 def _validate_names(
-    migrations: tuple[Migration, ...],
+    migrations: Sequence[Migration],
 ) -> list[ValidationIssue]:
-    """Validate migration-name uniqueness."""
+    """Validate migration name uniqueness."""
     issues: list[ValidationIssue] = []
-    seen_names: dict[str, Migration] = {}
+    seen: dict[str, Migration] = {}
 
     for migration in migrations:
-        previous = seen_names.get(
+        previous = seen.get(
             migration.name
         )
 
@@ -120,24 +118,46 @@ def _validate_names(
                 ValidationIssue(
                     code="DUPLICATE_NAME",
                     message=(
-                        f"Migration name '{migration.name}' is already "
-                        f"used by version {previous.version:03d}."
+                        f"Migration name '{migration.name}' "
+                        f"is already used by version "
+                        f"{previous.version:03d}."
                     ),
                     path=migration.path,
                     version=migration.version,
                 )
             )
         else:
-            seen_names[migration.name] = migration
+            seen[migration.name] = migration
 
     return issues
 
 
 def _validate_collection(
-    migrations: tuple[Migration, ...],
+    migrations: Sequence[Migration],
 ) -> list[ValidationIssue]:
-    """Validate relationships between discovered migrations."""
+    """Validate the discovered migration collection."""
     issues: list[ValidationIssue] = []
+
+    versions: set[int] = set()
+
+    for migration in migrations:
+        if migration.version in versions:
+            issues.append(
+                ValidationIssue(
+                    code="DUPLICATE_VERSION",
+                    message=(
+                        f"Migration version "
+                        f"{migration.version:03d} "
+                        "appears more than once."
+                    ),
+                    path=migration.path,
+                    version=migration.version,
+                )
+            )
+
+        versions.add(
+            migration.version
+        )
 
     issues.extend(
         _validate_version_sequence(
@@ -158,7 +178,7 @@ def _validate_checksums(
     migrations: Sequence[Migration],
     records: Sequence[MigrationRecord],
 ) -> list[ValidationIssue]:
-    """Validate checksums of applied migrations."""
+    """Validate checksums for applied migrations."""
     issues: list[ValidationIssue] = []
 
     mismatches = verify_migration_checksums(
@@ -172,7 +192,7 @@ def _validate_checksums(
                 code="CHECKSUM_MISMATCH",
                 message=mismatch.format(),
                 path=mismatch.migration.path,
-                version=mismatch.migration.version,
+                version=mismatch.version,
             )
         )
 
@@ -183,18 +203,20 @@ def validate_migrations(
     directory: Path,
     records: Sequence[MigrationRecord] | None = None,
 ) -> ValidationReport:
-    """Discover and validate the migration collection."""
+    """Validate migration files and optional history checksums."""
     try:
         migrations = discover_migrations(
             directory
         )
     except (
-        MigrationParseError,
         MigrationDiscoveryError,
+        MigrationParseError,
     ) as exc:
         return ValidationReport(
             migrations=[],
-            errors=[str(exc)],
+            errors=[
+                str(exc)
+            ],
         )
 
     issues = _validate_collection(

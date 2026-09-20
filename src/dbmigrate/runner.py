@@ -17,7 +17,7 @@ class MigrationRunnerError(Exception):
 
 @dataclass(frozen=True)
 class MigrationResult:
-    """Result of applying or rolling back a migration."""
+    """Describe a migration execution result."""
 
     migration: Migration
     action: str
@@ -25,74 +25,81 @@ class MigrationResult:
 
 
 class MigrationRunner:
-    """Apply and roll back database migrations."""
+    """Execute and roll back migrations."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+    ) -> None:
         self.database = database
-        self.history = MigrationHistory(database)
+        self.history = MigrationHistory(
+            database
+        )
 
     def initialize(self) -> None:
-        """Initialize migration history storage."""
+        """Initialize migration history."""
         try:
             self.history.initialize()
-        except (DatabaseError, HistoryError) as exc:
+        except HistoryError as exc:
             raise MigrationRunnerError(
-                f"Could not initialize migration history: {exc}"
+                str(exc)
             ) from exc
 
     def pending(
         self,
         migrations: Sequence[Migration],
     ) -> list[Migration]:
-        """Return unapplied migrations in version order."""
+        """Return migrations that have not been applied."""
         self.initialize()
 
-        ordered = sorted(
+        result: list[Migration] = []
+
+        for migration in sorted(
             migrations,
-            key=lambda migration: migration.version,
-        )
-
-        pending: list[Migration] = []
-
-        for migration in ordered:
+            key=lambda item: item.version,
+        ):
             try:
-                if not self.history.is_applied(
+                applied = self.history.is_applied(
                     migration.version
-                ):
-                    pending.append(migration)
+                )
             except HistoryError as exc:
                 raise MigrationRunnerError(
-                    f"Could not determine migration state for "
-                    f"{migration.identifier}: {exc}"
+                    str(exc)
                 ) from exc
 
-        return pending
+            if not applied:
+                result.append(
+                    migration
+                )
+
+        return result
 
     def applied(
         self,
         migrations: Sequence[Migration],
     ) -> list[Migration]:
-        """Return applied migrations in version order."""
+        """Return migrations that have been applied."""
         self.initialize()
-
-        ordered = sorted(
-            migrations,
-            key=lambda migration: migration.version,
-        )
 
         result: list[Migration] = []
 
-        for migration in ordered:
+        for migration in sorted(
+            migrations,
+            key=lambda item: item.version,
+        ):
             try:
-                if self.history.is_applied(
+                applied = self.history.is_applied(
                     migration.version
-                ):
-                    result.append(migration)
+                )
             except HistoryError as exc:
                 raise MigrationRunnerError(
-                    f"Could not determine migration state for "
-                    f"{migration.identifier}: {exc}"
+                    str(exc)
                 ) from exc
+
+            if applied:
+                result.append(
+                    migration
+                )
 
         return result
 
@@ -100,48 +107,39 @@ class MigrationRunner:
         self,
         migration: Migration,
     ) -> MigrationResult:
-        """Apply one migration atomically."""
+        """Apply one migration."""
         self.initialize()
 
-        try:
-            if self.history.is_applied(
-                migration.version
-            ):
-                raise MigrationRunnerError(
-                    f"Migration {migration.identifier} "
-                    "is already applied."
-                )
-
-            checksum = calculate_checksum(
-                migration
+        if self.history.is_applied(
+            migration.version
+        ):
+            raise MigrationRunnerError(
+                f"Migration {migration.identifier} "
+                "already applied."
             )
 
+        checksum = calculate_checksum(
+            migration
+        )
+
+        try:
             with self.database.transaction():
                 self.database.execute(
                     migration.up_sql
                 )
 
                 self.history.record(
-                    migration.version,
-                    migration.name,
-                    checksum,
+                    version=migration.version,
+                    name=migration.name,
+                    checksum=checksum,
                 )
-
-        except MigrationRunnerError:
-            raise
 
         except (
             DatabaseError,
             HistoryError,
         ) as exc:
             raise MigrationRunnerError(
-                f"Failed to apply migration "
-                f"{migration.identifier}: {exc}"
-            ) from exc
-
-        except Exception as exc:
-            raise MigrationRunnerError(
-                f"Failed to apply migration "
+                f"Could not apply migration "
                 f"{migration.identifier}: {exc}"
             ) from exc
 
@@ -158,9 +156,13 @@ class MigrationRunner:
         """Apply all pending migrations in version order."""
         results: list[MigrationResult] = []
 
-        for migration in self.pending(migrations):
+        for migration in self.pending(
+            migrations
+        ):
             results.append(
-                self.apply(migration)
+                self.apply(
+                    migration
+                )
             )
 
         return results
@@ -169,7 +171,7 @@ class MigrationRunner:
         self,
         migration: Migration,
     ) -> MigrationResult:
-        """Roll back one applied migration atomically."""
+        """Roll back one applied migration."""
         self.initialize()
 
         try:
@@ -180,7 +182,7 @@ class MigrationRunner:
             if record is None:
                 raise MigrationRunnerError(
                     f"Migration {migration.identifier} "
-                    "is not applied."
+                    "has not been applied."
                 )
 
             with self.database.transaction():
@@ -194,22 +196,14 @@ class MigrationRunner:
 
         except MigrationRunnerError:
             raise
-
         except (
             DatabaseError,
             HistoryError,
         ) as exc:
             raise MigrationRunnerError(
-                f"Failed to roll back migration "
+                f"Could not roll back migration "
                 f"{migration.identifier}: {exc}"
             ) from exc
-
-        except Exception as exc:
-            raise MigrationRunnerError(
-                f"Failed to roll back migration "
-                f"{migration.identifier}: {exc}"
-            ) from exc
-
         return MigrationResult(
             migration=migration,
             action="rolled back",
@@ -221,7 +215,9 @@ class MigrationRunner:
         migrations: Sequence[Migration],
     ) -> MigrationResult | None:
         """Roll back the latest applied migration."""
-        applied = self.applied(migrations)
+        applied = self.applied(
+            migrations
+        )
 
         if not applied:
             return None
@@ -235,13 +231,15 @@ class MigrationRunner:
         migrations: Sequence[Migration],
         steps: int,
     ) -> list[MigrationResult]:
-        """Roll back the requested number of latest migrations."""
-        if steps < 1:
+        """Roll back a number of latest migrations."""
+        if steps <= 0:
             raise MigrationRunnerError(
                 "Rollback steps must be greater than zero."
             )
 
-        applied = self.applied(migrations)
+        applied = self.applied(
+            migrations
+        )
 
         if not applied:
             return []
@@ -249,7 +247,7 @@ class MigrationRunner:
         if steps > len(applied):
             raise MigrationRunnerError(
                 f"Cannot roll back {steps} migrations; "
-                f"only {len(applied)} are currently applied."
+                f"only {len(applied)} are applied."
             )
 
         results: list[MigrationResult] = []

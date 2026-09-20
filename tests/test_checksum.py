@@ -8,19 +8,24 @@ from dbmigrate.checksum import (
     verify_migration_checksums,
 )
 from dbmigrate.history import MigrationRecord
-from dbmigrate.migration import parse_migration
+from dbmigrate.migration import Migration
 
 
-def write_migration(
-    path: Path,
-    version: int,
-    name: str,
-    up_sql: str = "SELECT 1;",
-    down_sql: str = "SELECT 1;",
-) -> None:
-    """Write a migration fixture."""
+def make_migration(
+    tmp_path: Path,
+    version: int = 1,
+    name: str = "users",
+    up_sql: str = "CREATE TABLE users (id INTEGER);",
+    down_sql: str = "DROP TABLE users;",
+) -> Migration:
+    """Create a migration fixture."""
+    path = (
+        tmp_path
+        / f"{version:03d}_{name}.sql"
+    )
+
     path.write_text(
-        f"""-- migration: {version:03d}
+        f"""-- migration: {version}
 -- name: {name}
 
 -- +up
@@ -34,27 +39,38 @@ def write_migration(
         encoding="utf-8",
     )
 
+    return Migration(
+        version=version,
+        name=name,
+        up_sql=up_sql,
+        down_sql=down_sql,
+        path=path,
+    )
+
+
+def make_record(
+    migration: Migration,
+    checksum: str,
+) -> MigrationRecord:
+    """Create a history record fixture."""
+    return MigrationRecord(
+        version=migration.version,
+        name=migration.name,
+        checksum=checksum,
+        applied_at="2026-01-01T00:00:00+00:00",
+    )
+
 
 def test_checksum_is_deterministic(
     tmp_path: Path,
-):
-    """The same migration should always produce the same checksum."""
-    path = tmp_path / "001_users.sql"
-
-    write_migration(
-        path,
-        1,
-        "users",
-    )
-
-    migration = parse_migration(
-        path
+) -> None:
+    migration = make_migration(
+        tmp_path
     )
 
     first = calculate_checksum(
         migration
     )
-
     second = calculate_checksum(
         migration
     )
@@ -69,199 +85,105 @@ def test_checksum_is_deterministic(
 
 def test_checksum_changes_when_up_sql_changes(
     tmp_path: Path,
-):
-    """Changing migration SQL should change its checksum."""
-    path = tmp_path / "001_users.sql"
-
-    write_migration(
-        path,
-        1,
-        "users",
+) -> None:
+    first = make_migration(
+        tmp_path,
         up_sql="CREATE TABLE users (id INTEGER);",
     )
 
-    first_migration = parse_migration(
-        path
+    second = make_migration(
+        tmp_path,
+        up_sql="CREATE TABLE users (id INTEGER, name TEXT);",
     )
 
-    first_checksum = calculate_checksum(
-        first_migration
+    assert calculate_checksum(
+        first
+    ) != calculate_checksum(
+        second
     )
-
-    write_migration(
-        path,
-        1,
-        "users",
-        up_sql=(
-            "CREATE TABLE users "
-            "(id INTEGER PRIMARY KEY);"
-        ),
-    )
-
-    second_migration = parse_migration(
-        path
-    )
-
-    second_checksum = calculate_checksum(
-        second_migration
-    )
-
-    assert first_checksum != second_checksum
 
 
 def test_checksum_changes_when_down_sql_changes(
     tmp_path: Path,
-):
-    """Changing rollback SQL should change its checksum."""
-    path = tmp_path / "001_users.sql"
-
-    write_migration(
-        path,
-        1,
-        "users",
+) -> None:
+    first = make_migration(
+        tmp_path,
         down_sql="DROP TABLE users;",
     )
 
-    first_migration = parse_migration(
-        path
-    )
-
-    first_checksum = calculate_checksum(
-        first_migration
-    )
-
-    write_migration(
-        path,
-        1,
-        "users",
+    second = make_migration(
+        tmp_path,
         down_sql="DROP TABLE IF EXISTS users;",
     )
 
-    second_migration = parse_migration(
-        path
+    assert calculate_checksum(
+        first
+    ) != calculate_checksum(
+        second
     )
-
-    second_checksum = calculate_checksum(
-        second_migration
-    )
-
-    assert first_checksum != second_checksum
 
 
 def test_checksum_changes_when_name_changes(
     tmp_path: Path,
-):
-    """Changing the migration name should change its checksum."""
-    first_path = tmp_path / "001_users.sql"
-
-    write_migration(
-        first_path,
-        1,
-        "users",
+) -> None:
+    first = make_migration(
+        tmp_path,
+        name="users",
     )
 
-    first_migration = parse_migration(
-        first_path
+    second = make_migration(
+        tmp_path,
+        name="accounts",
     )
 
-    first_checksum = calculate_checksum(
-        first_migration
+    assert calculate_checksum(
+        first
+    ) != calculate_checksum(
+        second
     )
 
-    second_path = tmp_path / "001_accounts.sql"
 
-    write_migration(
-        second_path,
-        1,
-        "accounts",
-    )
-
-    second_migration = parse_migration(
-        second_path
-    )
-
-    second_checksum = calculate_checksum(
-        second_migration
-    )
-
-    assert first_checksum != second_checksum
-
-
-def test_matching_record_has_no_mismatch(
+def test_matching_checksum_has_no_mismatch(
     tmp_path: Path,
-):
-    """A matching history checksum should verify successfully."""
-    path = tmp_path / "001_users.sql"
-
-    write_migration(
-        path,
-        1,
-        "users",
-    )
-
-    migration = parse_migration(
-        path
+) -> None:
+    migration = make_migration(
+        tmp_path
     )
 
     checksum = calculate_checksum(
         migration
     )
 
-    record = MigrationRecord(
-        version=1,
-        name="users",
-        checksum=checksum,
-        applied_at="2026-01-01T00:00:00+00:00",
+    record = make_record(
+        migration,
+        checksum,
     )
 
-    mismatch = verify_migration_checksum(
+    assert verify_migration_checksum(
         migration,
         record,
-    )
-
-    assert mismatch is None
+    ) is None
 
 
-def test_modified_migration_is_detected(
+def test_modified_applied_migration_is_detected(
     tmp_path: Path,
-):
-    """A changed migration should produce a checksum mismatch."""
-    path = tmp_path / "001_users.sql"
-
-    write_migration(
-        path,
-        1,
-        "users",
-        up_sql="CREATE TABLE users (id INTEGER);",
-    )
-
-    original = parse_migration(
-        path
+) -> None:
+    migration = make_migration(
+        tmp_path
     )
 
     original_checksum = calculate_checksum(
-        original
+        migration
     )
 
-    record = MigrationRecord(
-        version=1,
-        name="users",
-        checksum=original_checksum,
-        applied_at="2026-01-01T00:00:00+00:00",
+    modified = make_migration(
+        tmp_path,
+        up_sql="CREATE TABLE users (id INTEGER, name TEXT);",
     )
 
-    write_migration(
-        path,
-        1,
-        "users",
-        up_sql=(
-            "CREATE TABLE users "
-            "(id INTEGER PRIMARY KEY);"
-        ),
-    )
-
-    modified = parse_migration(
-        path
+    record = make_record(
+        migration,
+        original_checksum,
     )
 
     mismatch = verify_migration_checksum(
@@ -271,126 +193,60 @@ def test_modified_migration_is_detected(
 
     assert mismatch is not None
     assert mismatch.expected == original_checksum
-    assert mismatch.actual != original_checksum
-    assert "checksum mismatch" in mismatch.format().lower()
+    assert mismatch.actual == calculate_checksum(
+        modified
+    )
+
+    assert (
+        "checksum mismatch"
+        in mismatch.format().lower()
+    )
 
 
-def test_checksum_verification_ignores_unapplied_migrations(
+def test_unapplied_migration_is_ignored(
     tmp_path: Path,
-):
-    """Only migrations with history records need checksum verification."""
-    first_path = tmp_path / "001_users.sql"
-    second_path = tmp_path / "002_posts.sql"
-
-    write_migration(
-        first_path,
-        1,
-        "users",
+) -> None:
+    migration = make_migration(
+        tmp_path
     )
 
-    write_migration(
-        second_path,
-        2,
-        "posts",
-    )
+    assert verify_migration_checksums(
+        [migration],
+        [],
+    ) == []
 
-    first = parse_migration(
-        first_path
-    )
 
-    second = parse_migration(
-        second_path
-    )
-
-    record = MigrationRecord(
+def test_multiple_mismatches_are_reported(
+    tmp_path: Path,
+) -> None:
+    first = make_migration(
+        tmp_path,
         version=1,
         name="users",
-        checksum=calculate_checksum(first),
-        applied_at="2026-01-01T00:00:00+00:00",
     )
+
+    second = make_migration(
+        tmp_path,
+        version=2,
+        name="posts",
+    )
+
+    records = [
+        make_record(
+            first,
+            "0" * 64,
+        ),
+        make_record(
+            second,
+            "1" * 64,
+        ),
+    ]
 
     mismatches = verify_migration_checksums(
         [first, second],
-        [record],
+        records,
     )
 
-    assert mismatches == []
-
-
-def test_multiple_checksum_mismatches_are_reported(
-    tmp_path: Path,
-):
-    """Multiple modified applied migrations should all be reported."""
-    first_path = tmp_path / "001_users.sql"
-    second_path = tmp_path / "002_posts.sql"
-
-    write_migration(
-        first_path,
-        1,
-        "users",
-        up_sql="CREATE TABLE users (id INTEGER);",
-    )
-
-    write_migration(
-        second_path,
-        2,
-        "posts",
-        up_sql="CREATE TABLE posts (id INTEGER);",
-    )
-
-    first = parse_migration(
-        first_path
-    )
-
-    second = parse_migration(
-        second_path
-    )
-
-    first_record = MigrationRecord(
-        version=1,
-        name="users",
-        checksum=calculate_checksum(first),
-        applied_at="2026-01-01T00:00:00+00:00",
-    )
-
-    second_record = MigrationRecord(
-        version=2,
-        name="posts",
-        checksum=calculate_checksum(second),
-        applied_at="2026-01-01T00:00:00+00:00",
-    )
-
-    write_migration(
-        first_path,
-        1,
-        "users",
-        up_sql="CREATE TABLE users (id INTEGER PRIMARY KEY);",
-    )
-
-    write_migration(
-        second_path,
-        2,
-        "posts",
-        up_sql=(
-            "CREATE TABLE posts "
-            "(id INTEGER PRIMARY KEY);"
-        ),
-    )
-
-    first_modified = parse_migration(
-        first_path
-    )
-
-    second_modified = parse_migration(
-        second_path
-    )
-
-    mismatches = verify_migration_checksums(
-        [first_modified, second_modified],
-        [first_record, second_record],
-    )
-
-    assert len(mismatches) == 2
     assert {
         mismatch.version
         for mismatch in mismatches
