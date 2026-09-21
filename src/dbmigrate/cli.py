@@ -28,6 +28,8 @@ from .status import (
 )
 from .validation import validate_migrations
 from .linter import lint_migrations
+from .explainer import explain_migrations
+from .impact import analyze_migrations
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -131,6 +133,12 @@ def run_command(
 
     if command.name == "status":
         return _run_status(config)
+
+    if command.name == "explain":
+        return _run_explain(config)
+
+    if command.name == "impact":
+        return _run_impact(config)
 
     print(
         f"Command '{command.name}' is not implemented yet. "
@@ -844,7 +852,140 @@ def _run_lint(config) -> int:
         )
         return 1
 
+def _run_explain(config) -> int:
+    """Explain recognized operations in migrations."""
+    try:
+        migrations = _load_migrations(
+            config
+        )
 
+        explanations = explain_migrations(
+            migrations
+        )
+
+        print("Migration explanation")
+        print("=====================")
+
+        for explanation in explanations:
+            print()
+            print(
+                explanation.migration.identifier
+            )
+
+            if explanation.is_empty:
+                print(
+                    "  No recognized SQL operations."
+                )
+                continue
+
+            for item in explanation.explanations:
+                print()
+                print(
+                    f"  {item.section.upper()}"
+                )
+                print(
+                    f"    {item.operation}"
+                )
+                print(
+                    f"      line: {item.line}"
+                )
+                print(
+                    f"      {item.description}"
+                )
+
+        if not explanations:
+            print(
+                "\nNo migrations found."
+            )
+
+        return 0
+
+    except MigrationRunnerError as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+def _run_impact(config) -> int:
+    """Analyze the apparent impact of migrations."""
+    try:
+        migrations = _load_migrations(
+            config
+        )
+
+        impacts = analyze_migrations(
+            migrations
+        )
+
+        print("Migration impact")
+        print("================")
+
+        for impact in impacts:
+            print()
+            print(
+                impact.migration.identifier
+            )
+
+            print()
+            print("  Tables:")
+
+            if impact.tables:
+                for table in impact.tables:
+                    print(
+                        f"    {table}"
+                    )
+            else:
+                print(
+                    "    None detected"
+                )
+
+            print()
+            print("  Indexes:")
+
+            if impact.indexes:
+                for index in impact.indexes:
+                    print(
+                        f"    {index}"
+                    )
+            else:
+                print(
+                    "    None detected"
+                )
+
+            print()
+            print("  Operations:")
+
+            if impact.operations:
+                for operation in impact.operations:
+                    print(
+                        f"    {operation}"
+                    )
+            else:
+                print(
+                    "    None detected"
+                )
+
+            print()
+            print(
+                f"  Risk: {impact.risk}"
+            )
+
+        if not impacts:
+            print(
+                "\nNo migrations found."
+            )
+
+        return 0
+
+    except MigrationRunnerError as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    
 def main(
     argv: list[str] | None = None,
 ) -> int:
