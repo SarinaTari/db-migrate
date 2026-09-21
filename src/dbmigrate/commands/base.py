@@ -1,4 +1,4 @@
-"""Command definitions and command resolution."""
+"""Command definitions for dbmigrate."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Command:
-    """A dbmigrate CLI command."""
+    """Describe a CLI command."""
 
     name: str
     description: str
@@ -16,7 +16,7 @@ class Command:
 _COMMANDS = (
     Command(
         "init",
-        "Initialize a new dbmigrate project.",
+        "Initialize a migration project.",
     ),
     Command(
         "create",
@@ -40,7 +40,7 @@ _COMMANDS = (
     ),
     Command(
         "current",
-        "Show the current migration version.",
+        "Show the current migration.",
     ),
     Command(
         "validate",
@@ -48,23 +48,23 @@ _COMMANDS = (
     ),
     Command(
         "plan",
-        "Show the planned migration operations.",
+        "Show the migrations that would be applied.",
     ),
     Command(
         "lint",
-        "Analyze migrations for common problems.",
+        "Analyze migrations for potential problems.",
     ),
     Command(
         "explain",
-        "Explain a migration.",
+        "Explain migration behavior.",
     ),
     Command(
         "impact",
-        "Analyze the impact of a migration.",
+        "Analyze migration impact.",
     ),
     Command(
         "schema",
-        "Inspect the current database schema.",
+        "Inspect the database schema.",
     ),
     Command(
         "schema-diff",
@@ -76,7 +76,7 @@ _COMMANDS = (
     ),
     Command(
         "doctor",
-        "Diagnose project and database problems.",
+        "Check project health.",
     ),
     Command(
         "check",
@@ -94,7 +94,9 @@ def get_commands() -> tuple[Command, ...]:
     return _COMMANDS
 
 
-def resolve_command(name: str) -> Command | None:
+def resolve_command(
+    name: str,
+) -> Command | None:
     """Resolve a command by name."""
     for command in _COMMANDS:
         if command.name == name:

@@ -509,3 +509,138 @@ def test_status_requires_configuration(
 
     assert exit_code == 1
     assert "Configuration error" in captured.err
+
+
+def test_plan_command_exists(
+    capsys,
+) -> None:
+    exit_code = main(
+        ["--help"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "plan" in captured.out
+
+
+def test_plan_reports_pending_migrations(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    migrations_path = (
+        tmp_path / "migrations"
+    )
+    migrations_path.mkdir()
+
+    (migrations_path / "001_create_users.sql").write_text(
+        """-- migration: 1
+-- name: create_users
+
+-- +up
+
+CREATE TABLE users (id INTEGER);
+
+-- +down
+
+DROP TABLE users;
+""",
+        encoding="utf-8",
+    )
+
+    (migrations_path / "002_create_posts.sql").write_text(
+        """-- migration: 2
+-- name: create_posts
+
+-- +up
+
+CREATE TABLE posts (id INTEGER);
+
+-- +down
+
+DROP TABLE posts;
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["plan"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Migration plan" in captured.out
+    assert "Pending migrations: 2" in captured.out
+    assert "001 create_users" in captured.out
+    assert "002 create_posts" in captured.out
+    assert "No changes were made" in captured.out
+
+
+def test_plan_does_not_apply_migrations(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    migrations_path = (
+        tmp_path / "migrations"
+    )
+    migrations_path.mkdir()
+
+    (migrations_path / "001_create_users.sql").write_text(
+        """-- migration: 1
+-- name: create_users
+-- +up
+CREATE TABLE users (id INTEGER);
+-- +down
+DROP TABLE users;
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["plan"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Pending migrations: 1" in captured.out
+    assert "001 create_users" in captured.out
+    assert "No changes were made to the database." in captured.out
+
+    database_path = (
+        tmp_path / "database.db"
+    )
+
+    if database_path.exists():
+        connection = sqlite3.connect(
+            database_path
+        )
+
+        try:
+            table = connection.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'users'
+                """
+            ).fetchone()
+
+            assert table is None
+        finally:
+            connection.close()

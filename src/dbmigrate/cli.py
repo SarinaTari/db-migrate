@@ -20,6 +20,7 @@ from .migration_creator import (
     MigrationCreationError,
     create_migration,
 )
+from .planner import MigrationPlanner, MigrationPlanningError
 from .runner import MigrationRunner, MigrationRunnerError
 from .status import (
     MigrationStatusError,
@@ -105,6 +106,9 @@ def run_command(
 
     if command.name == "check":
         return _run_check(config)
+
+    if command.name == "plan":
+        return _run_plan(config)
 
     if command.name == "up":
         return _run_up(config)
@@ -296,6 +300,97 @@ def _create_database(
     return SQLiteDatabase(path)
 
 
+def _load_migrations(config):
+    """Load migration files."""
+    try:
+        return discover_migrations(
+            config.migrations_path
+        )
+    except (
+        MigrationDiscoveryError,
+        MigrationParseError,
+    ) as exc:
+        raise MigrationRunnerError(
+            f"Could not load migrations: {exc}"
+        ) from exc
+
+
+def _run_plan(config) -> int:
+    """Show the migrations that would be applied."""
+    database = _create_database(
+        config.database_url
+    )
+
+    if database is None:
+        return 1
+
+    try:
+        database.connect()
+
+        migrations = _load_migrations(
+            config
+        )
+
+        history = MigrationHistory(
+            database
+        )
+
+        planner = MigrationPlanner(
+            history
+        )
+
+        plan = planner.plan(
+            migrations
+        )
+
+        print(
+            "Migration plan"
+        )
+        print(
+            "==============="
+        )
+
+        if plan.is_empty:
+            print(
+                "\nNo pending migrations."
+            )
+            print(
+                "No changes would be made to the database."
+            )
+            return 0
+
+        print(
+            f"\nPending migrations: "
+            f"{plan.count}"
+        )
+
+        for migration in plan.pending:
+            print(
+                f"  {migration.version:03d} "
+                f"{migration.name}"
+            )
+
+        print(
+            "\nNo changes were made to the database."
+        )
+
+        return 0
+
+    except (
+        DatabaseError,
+        MigrationRunnerError,
+        MigrationPlanningError,
+    ) as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    finally:
+        database.close()
+
+
 def _run_check(config) -> int:
     """Check database connectivity."""
     database = _create_database(
@@ -341,21 +436,6 @@ def _run_check(config) -> int:
 
     finally:
         database.close()
-
-
-def _load_migrations(config):
-    """Load migration files."""
-    try:
-        return discover_migrations(
-            config.migrations_path
-        )
-    except (
-        MigrationDiscoveryError,
-        MigrationParseError,
-    ) as exc:
-        raise MigrationRunnerError(
-            f"Could not load migrations: {exc}"
-        ) from exc
 
 
 def _run_up(config) -> int:

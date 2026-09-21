@@ -3,8 +3,11 @@
 
 -- +up
 
--- Write your SQL here.
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
 
 -- +down
 
--- Write your rollback SQL here.
+DROP TABLE users;
