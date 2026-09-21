@@ -644,3 +644,101 @@ DROP TABLE users;
             assert table is None
         finally:
             connection.close()
+
+def test_lint_command_exists() -> None:
+    exit_code = main(
+        ["lint"]
+    )
+
+    assert exit_code != 2
+
+def test_lint_reports_dangerous_migration(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    migrations_path = (
+        tmp_path / "migrations"
+    )
+    migrations_path.mkdir()
+
+    (
+        migrations_path
+        / "001_delete_users.sql"
+    ).write_text(
+        """-- migration: 1
+-- name: delete_users
+
+-- +up
+
+DELETE FROM users;
+
+-- +down
+
+CREATE TABLE users (id INTEGER);
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["lint"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Migration lint" in captured.out
+    assert "DELETE_NO_WHERE" in captured.out
+    assert "ERROR" in captured.out
+    assert "Errors:   1" in captured.out
+
+def test_lint_clean_migration(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    write_config(
+        tmp_path / "dbmigrate.toml"
+    )
+
+    migrations_path = (
+        tmp_path / "migrations"
+    )
+    migrations_path.mkdir()
+
+    (
+        migrations_path
+        / "001_create_users.sql"
+    ).write_text(
+        """-- migration: 1
+-- name: create_users
+
+-- +up
+
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY
+);
+
+-- +down
+
+DROP TABLE users;
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["lint"]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "DROP_TABLE" in captured.out

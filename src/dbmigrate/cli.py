@@ -27,6 +27,7 @@ from .status import (
     MigrationStatusInspector,
 )
 from .validation import validate_migrations
+from .linter import lint_migrations
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -109,6 +110,9 @@ def run_command(
 
     if command.name == "plan":
         return _run_plan(config)
+
+    if command.name == "lint":
+        return _run_lint(config)
 
     if command.name == "up":
         return _run_up(config)
@@ -768,6 +772,77 @@ def _run_status(config) -> int:
 
     finally:
         database.close()
+
+
+def _run_lint(config) -> int:
+    """Lint migration SQL for potentially dangerous operations."""
+    try:
+        migrations = _load_migrations(
+            config
+        )
+
+        report = lint_migrations(
+            migrations
+        )
+
+        print("Migration lint")
+        print("===============")
+
+        if report.is_clean:
+            print("\nNo lint issues found.")
+            print(
+                f"Checked {len(report.migrations)} "
+                "migration(s)."
+            )
+            return 0
+
+        for migration in report.migrations:
+            migration_issues = [
+                issue
+                for issue in report.issues
+                if issue.migration == migration
+            ]
+
+            if not migration_issues:
+                continue
+
+            print()
+            print(migration.identifier)
+
+            for issue in migration_issues:
+                print(
+                    f"  {issue.severity} "
+                    f"[{issue.code}]"
+                )
+                print(
+                    f"  {issue.section}: "
+                    f"line {issue.line}"
+                )
+                print(
+                    f"  {issue.message}"
+                )
+
+        print()
+        print("Summary")
+        print("-------")
+        print(
+            f"Errors:   {report.error_count}"
+        )
+        print(
+            f"Warnings: {report.warning_count}"
+        )
+        print(
+            f"Info:     {report.info_count}"
+        )
+
+        return 1 if not report.is_valid else 0
+
+    except MigrationRunnerError as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
 
 
 def main(
