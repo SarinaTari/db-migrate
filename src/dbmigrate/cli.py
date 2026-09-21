@@ -34,6 +34,11 @@ from .schema import (
     SchemaInspectionError,
     inspect_schema,
 )
+from .reproducibility import (
+    ReproducibilityError,
+    check_reproducibility,
+)
+from .schema import inspect_schema
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,6 +154,9 @@ def run_command(
 
     if command.name == "fingerprint":
         return _run_fingerprint(config)
+
+    if command.name == "schema-diff":
+        return _run_schema_diff(config)
 
     print(
         f"Command '{command.name}' is not implemented yet. "
@@ -1150,6 +1158,81 @@ def _run_fingerprint(config) -> int:
     except (
         DatabaseError,
         SchemaInspectionError,
+    ) as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    finally:
+        database.close()
+
+
+def _run_schema_diff(config) -> int:
+    """Compare the current database schema with a reproduced schema."""
+    database = _create_database(
+        config.database_url
+    )
+
+    if database is None:
+        return 1
+
+    try:
+        database.connect()
+
+        migrations = _load_migrations(
+            config
+        )
+
+        target_schema = inspect_schema(
+            database
+        )
+
+        report = check_reproducibility(
+            migrations,
+            target_schema,
+        )
+
+        print("Schema diff")
+        print("===========")
+
+        print(
+            f"\nExpected fingerprint: "
+            f"{report.expected_fingerprint}"
+        )
+
+        print(
+            f"Actual fingerprint:   "
+            f"{report.actual_fingerprint}"
+        )
+
+        if report.is_reproducible:
+            print(
+                "\nSchemas are identical."
+            )
+            print(
+                "Migration set is reproducible."
+            )
+            return 0
+
+        print("\nDifferences:")
+
+        for change in report.diff.changes:
+            print(
+                f"  {change.format()}"
+            )
+
+        print(
+            "\nSchema reproduction failed."
+        )
+
+        return 1
+
+    except (
+        DatabaseError,
+        MigrationRunnerError,
+        ReproducibilityError,
     ) as exc:
         print(
             f"Error: {exc}",

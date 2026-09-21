@@ -209,6 +209,7 @@ def _database_objects(
             FROM sqlite_master
             WHERE type = ?
               AND name NOT LIKE 'sqlite_%'
+              AND name != 'schema_migrations'
             ORDER BY name
             """,
             (object_type,),
@@ -225,7 +226,6 @@ def _database_objects(
         )
         for row in rows
     ]
-
 
 def _inspect_columns(
     database,
