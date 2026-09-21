@@ -49,7 +49,7 @@ _OPERATION_PATTERNS = (
         "CREATE_TABLE",
         re.compile(
             r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-            r"([`\"\[]?[\w.]+[`\"\]]?)",
+            r"([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Creates table '{object}'.",
@@ -58,7 +58,7 @@ _OPERATION_PATTERNS = (
         "DROP_TABLE",
         re.compile(
             r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?"
-            r"([`\"\[]?[\w.]+[`\"\]]?)",
+            r"([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Removes table '{object}'.",
@@ -66,7 +66,7 @@ _OPERATION_PATTERNS = (
     (
         "ALTER_TABLE",
         re.compile(
-            r"\bALTER\s+TABLE\s+([`\"\[]?[\w.]+[`\"\]]?)",
+            r"\bALTER\s+TABLE\s+([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Changes the structure of table '{object}'.",
@@ -75,7 +75,7 @@ _OPERATION_PATTERNS = (
         "CREATE_INDEX",
         re.compile(
             r"\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+"
-            r"([`\"\[]?[\w.]+[`\"\]]?)",
+            r"([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Creates index '{object}'.",
@@ -84,7 +84,7 @@ _OPERATION_PATTERNS = (
         "DROP_INDEX",
         re.compile(
             r"\bDROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?"
-            r"([`\"\[]?[\w.]+[`\"\]]?)",
+            r"([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Removes index '{object}'.",
@@ -92,7 +92,7 @@ _OPERATION_PATTERNS = (
     (
         "INSERT",
         re.compile(
-            r"\bINSERT\s+INTO\s+([`\"\[]?[\w.]+[`\"\]]?)",
+            r"\bINSERT\s+INTO\s+([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Inserts data into table '{object}'.",
@@ -100,7 +100,7 @@ _OPERATION_PATTERNS = (
     (
         "UPDATE",
         re.compile(
-            r"\bUPDATE\s+([`\"\[]?[\w.]+[`\"\]]?)",
+            r"\bUPDATE\s+([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Updates data in table '{object}'.",
@@ -108,7 +108,7 @@ _OPERATION_PATTERNS = (
     (
         "DELETE",
         re.compile(
-            r"\bDELETE\s+FROM\s+([`\"\[]?[\w.]+[`\"\]]?)",
+            r"\bDELETE\s+FROM\s+([\`\"\[]?[\w.]+[\`\"\]]?)",
             re.IGNORECASE,
         ),
         "Deletes data from table '{object}'.",
@@ -123,26 +123,218 @@ def _clean_identifier(identifier: str) -> str:
     )
 
 
+def _mask_sql_comments_and_literals(sql: str) -> str:
+    """
+    Mask SQL comments and quoted literals while preserving line structure.
+
+    SQL keywords inside comments or quoted values/identifiers are replaced
+    with spaces so they cannot be mistaken for operations.
+    """
+    result: list[str] = []
+    index = 0
+    length = len(sql)
+
+    while index < length:
+        char = sql[index]
+
+        if (
+            char == "-"
+            and index + 1 < length
+            and sql[index + 1] == "-"
+        ):
+            result.extend((" ", " "))
+            index += 2
+
+            while index < length and sql[index] != "\n":
+                result.append(" ")
+                index += 1
+
+            continue
+
+        if (
+            char == "/"
+            and index + 1 < length
+            and sql[index + 1] == "*"
+        ):
+            result.extend((" ", " "))
+            index += 2
+
+            while index < length:
+                if (
+                    sql[index] == "*"
+                    and index + 1 < length
+                    and sql[index + 1] == "/"
+                ):
+                    result.extend((" ", " "))
+                    index += 2
+                    break
+
+                if sql[index] == "\n":
+                    result.append("\n")
+                else:
+                    result.append(" ")
+
+                index += 1
+
+            continue
+
+        if char in ("'", '"', "`"):
+            quote = char
+            result.append(" ")
+            index += 1
+
+            while index < length:
+                current = sql[index]
+
+                if current == "\n":
+                    result.append("\n")
+                    index += 1
+                    continue
+
+                if current == quote:
+                    if (
+                        index + 1 < length
+                        and sql[index + 1] == quote
+                    ):
+                        result.extend((" ", " "))
+                        index += 2
+                        continue
+
+                    result.append(" ")
+                    index += 1
+                    break
+
+                result.append(" ")
+                index += 1
+
+            continue
+
+        if char == "[":
+            result.append(" ")
+            index += 1
+
+            while index < length:
+                current = sql[index]
+
+                if current == "\n":
+                    result.append("\n")
+                    index += 1
+                    continue
+
+                if current == "]":
+                    result.append(" ")
+                    index += 1
+                    break
+
+                result.append(" ")
+                index += 1
+
+            continue
+
+        result.append(char)
+        index += 1
+
+    return "".join(result)
+
+
+def _statement_lines(
+    sql: str,
+) -> list[tuple[int, str]]:
+    """Return non-empty SQL lines with their original numbers."""
+    masked_sql = _mask_sql_comments_and_literals(sql)
+
+    return [
+        (line_number, line)
+        for line_number, line in enumerate(
+            masked_sql.splitlines(),
+            start=1,
+        )
+        if line.strip()
+    ]
+
+
+def _statements_from_lines(
+    lines: list[tuple[int, str]],
+) -> list[tuple[int, str]]:
+    """
+    Split SQL into statements.
+
+    The returned line number is the first source line of each statement.
+    Statement splitting is intentionally lightweight and semicolon-based.
+    """
+    statements: list[tuple[int, str]] = []
+
+    current: list[str] = []
+    start_line: int | None = None
+
+    for line_number, line in lines:
+        if start_line is None:
+            start_line = line_number
+
+        parts = line.split(";")
+
+        if len(parts) == 1:
+            current.append(line)
+            continue
+
+        if current:
+            current.append(parts[0])
+        else:
+            current = [parts[0]]
+
+        statement = "\n".join(current).strip()
+
+        if statement and start_line is not None:
+            statements.append(
+                (
+                    start_line,
+                    statement,
+                )
+            )
+
+        current = []
+        start_line = None
+
+        for part in parts[1:-1]:
+            if part.strip():
+                statements.append(
+                    (
+                        line_number,
+                        part.strip(),
+                    )
+                )
+
+        if parts[-1].strip():
+            current = [parts[-1]]
+            start_line = line_number
+
+    if current and start_line is not None:
+        statement = "\n".join(current).strip()
+
+        if statement:
+            statements.append(
+                (
+                    start_line,
+                    statement,
+                )
+            )
+
+    return statements
+
+
 def _explain_section(
     section: str,
     sql: str,
 ) -> list[Explanation]:
     """Explain recognized operations in one SQL section."""
+    lines = _statement_lines(sql)
+    statements = _statements_from_lines(lines)
+
     explanations: list[Explanation] = []
 
-    for line_number, line in enumerate(
-        sql.splitlines(),
-        start=1,
-    ):
-        stripped = line.strip()
-
-        if not stripped:
-            continue
-
+    for line_number, statement in statements:
         for operation, pattern, template in _OPERATION_PATTERNS:
-            match = pattern.search(
-                stripped
-            )
+            match = pattern.search(statement)
 
             if match is None:
                 continue

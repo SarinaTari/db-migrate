@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+from .checksum import verify_migration_checksums
 from .database import Database, DatabaseError
-from .history import HistoryError, MigrationHistory, MigrationRecord
+from .history import HistoryError, MigrationHistory
 from .migration import Migration
 
 
@@ -34,7 +35,11 @@ class SafetyIssue:
 
     def format(self) -> str:
         """Return a human-readable issue description."""
-        return f"{self.severity} [{self.code}]: {self.message}"
+        return (
+            f"{self.severity} "
+            f"[{self.code}]: "
+            f"{self.message}"
+        )
 
 
 @dataclass(frozen=True)
@@ -80,10 +85,15 @@ class SafetyReport:
 class MigrationSafetyChecker:
     """Check migrations for database and execution safety."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+    ) -> None:
         """Initialize the safety checker."""
         self.database = database
-        self.history = MigrationHistory(database)
+        self.history = MigrationHistory(
+            database
+        )
 
     def check(
         self,
@@ -96,25 +106,36 @@ class MigrationSafetyChecker:
             self._check_database_connection()
         )
         issues.extend(
-            self._check_migration_order(migrations)
+            self._check_migration_order(
+                migrations
+            )
         )
         issues.extend(
-            self._check_duplicates(migrations)
+            self._check_duplicates(
+                migrations
+            )
         )
         issues.extend(
             self._check_capabilities()
         )
         issues.extend(
-            self._check_applied_migrations(migrations)
+            self._check_applied_migrations(
+                migrations
+            )
         )
 
         return SafetyReport(
             issues=tuple(issues)
         )
 
-    def require_safe(self, migrations) -> SafetyReport:
+    def require_safe(
+        self,
+        migrations: Sequence[Migration],
+    ) -> SafetyReport:
         """Run safety checks and raise if unsafe."""
-        report = self.check(migrations)
+        report = self.check(
+            migrations
+        )
 
         if not report.is_safe:
             raise MigrationSafetyError(
@@ -199,10 +220,16 @@ class MigrationSafetyChecker:
 
         for migration in migrations:
             version_counts[migration.version] = (
-                version_counts.get(migration.version, 0) + 1
+                version_counts.get(
+                    migration.version,
+                    0,
+                )
+                + 1
             )
 
-        for version, count in sorted(version_counts.items()):
+        for version, count in sorted(
+            version_counts.items()
+        ):
             if count > 1:
                 issues.append(
                     SafetyIssue(
@@ -220,10 +247,16 @@ class MigrationSafetyChecker:
         for migration in migrations:
             identifier = migration.name
             identifier_counts[identifier] = (
-                identifier_counts.get(identifier, 0) + 1
+                identifier_counts.get(
+                    identifier,
+                    0,
+                )
+                + 1
             )
 
-        for identifier, count in sorted(identifier_counts.items()):
+        for identifier, count in sorted(
+            identifier_counts.items()
+        ):
             if count > 1:
                 issues.append(
                     SafetyIssue(
@@ -322,8 +355,6 @@ class MigrationSafetyChecker:
             )
 
         try:
-            from .checksum import verify_migration_checksums
-
             checksum_mismatches = verify_migration_checksums(
                 migrations,
                 records,

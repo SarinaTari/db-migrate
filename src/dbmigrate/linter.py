@@ -172,37 +172,214 @@ _RULES = (
 )
 
 
+def _mask_sql_comments_and_literals(sql: str) -> str:
+    """
+    Mask SQL comments and quoted literals while preserving line structure.
+
+    The returned string has the same number of lines as the input, allowing
+    lint issues to retain their original source line numbers. SQL keywords
+    inside comments and quoted values/identifiers are replaced with spaces so
+    they cannot be mistaken for SQL operations.
+    """
+    result: list[str] = []
+    index = 0
+    length = len(sql)
+
+    while index < length:
+        char = sql[index]
+
+        if char == "-" and index + 1 < length and sql[index + 1] == "-":
+            result.extend((" ", " "))
+            index += 2
+
+            while index < length and sql[index] != "\n":
+                result.append(" ")
+                index += 1
+
+            continue
+
+        if char == "/" and index + 1 < length and sql[index + 1] == "*":
+            result.extend((" ", " "))
+            index += 2
+
+            while index < length:
+                if (
+                    sql[index] == "*"
+                    and index + 1 < length
+                    and sql[index + 1] == "/"
+                ):
+                    result.extend((" ", " "))
+                    index += 2
+                    break
+
+                if sql[index] == "\n":
+                    result.append("\n")
+                else:
+                    result.append(" ")
+
+                index += 1
+
+            continue
+
+        if char in ("'", '"', "`"):
+            quote = char
+            result.append(" ")
+            index += 1
+
+            while index < length:
+                current = sql[index]
+
+                if current == "\n":
+                    result.append("\n")
+                    index += 1
+                    continue
+
+                if current == quote:
+                    if (
+                        index + 1 < length
+                        and sql[index + 1] == quote
+                    ):
+                        result.extend((" ", " "))
+                        index += 2
+                        continue
+
+                    result.append(" ")
+                    index += 1
+                    break
+
+                result.append(" ")
+                index += 1
+
+            continue
+
+        if char == "[":
+            result.append(" ")
+            index += 1
+
+            while index < length:
+                current = sql[index]
+
+                if current == "\n":
+                    result.append("\n")
+                    index += 1
+                    continue
+
+                if current == "]":
+                    result.append(" ")
+                    index += 1
+                    break
+
+                result.append(" ")
+                index += 1
+
+            continue
+
+        result.append(char)
+        index += 1
+
+    return "".join(result)
+
+
 def _statement_lines(
     sql: str,
+) -> list[tuple[int, str, str]]:
+    """
+    Return non-empty SQL lines with original and analysis-safe content.
+
+    Each tuple contains:
+        (original line number, original line, masked line)
+    """
+    masked_sql = _mask_sql_comments_and_literals(sql)
+
+    original_lines = sql.splitlines()
+    masked_lines = masked_sql.splitlines()
+
+    lines: list[tuple[int, str, str]] = []
+
+    for line_number, (original, masked) in enumerate(
+        zip(original_lines, masked_lines),
+        start=1,
+    ):
+        if masked.strip():
+            lines.append(
+                (
+                    line_number,
+                    original,
+                    masked,
+                )
+            )
+
+    return lines
+
+
+def _statements_from_lines(
+    lines: list[tuple[int, str, str]],
 ) -> list[tuple[int, str]]:
-    """Return non-empty SQL lines with their original numbers."""
-    return [
-        (line_number, line)
-        for line_number, line in enumerate(
-            sql.splitlines(),
-            start=1,
-        )
-        if line.strip()
-    ]
+    """
+    Split analysis-safe SQL into statements.
+
+    The returned line number is the first source line of each statement.
+    Statement splitting is intentionally lightweight and semicolon-based.
+    """
+    statements: list[tuple[int, str]] = []
+
+    current: list[str] = []
+    start_line: int | None = None
+
+    for line_number, _, masked_line in lines:
+        if start_line is None:
+            start_line = line_number
+
+        current.append(masked_line)
+
+        parts = masked_line.split(";")
+
+        if len(parts) == 1:
+            continue
+
+        for part in parts[:-1]:
+            statement = "\n".join(current[:-1] + [part]).strip()
+
+            if statement:
+                statements.append(
+                    (
+                        start_line,
+                        statement,
+                    )
+                )
+
+            current = []
+            start_line = None
+
+        remainder = parts[-1]
+
+        if remainder.strip():
+            current = [remainder]
+            if start_line is None:
+                start_line = line_number
+
+    if current:
+        statement = "\n".join(current).strip()
+
+        if statement and start_line is not None:
+            statements.append(
+                (
+                    start_line,
+                    statement,
+                )
+            )
+
+    return statements
 
 
-def _has_where_after(
-    lines: list[tuple[int, str]],
-    index: int,
+def _has_where(
+    statement: str,
 ) -> bool:
-    """Return whether WHERE appears in the current statement."""
-    statement: list[str] = []
-
-    for _, line in lines[index:]:
-        statement.append(line)
-
-        if ";" in line:
-            break
-
+    """Return whether WHERE appears in the current SQL statement."""
     return bool(
         re.search(
             r"\bWHERE\b",
-            "\n".join(statement),
+            statement,
             re.IGNORECASE,
         )
     )
@@ -215,20 +392,20 @@ def _lint_section(
 ) -> list[LintIssue]:
     """Lint one migration SQL section."""
     lines = _statement_lines(sql)
+    statements = _statements_from_lines(lines)
+
     issues: list[LintIssue] = []
 
-    for index, (line_number, line) in enumerate(lines):
+    for line_number, statement in statements:
         for rule in _RULES:
-            if not rule.pattern.search(line):
+            if not rule.pattern.search(statement):
                 continue
 
-            if rule.code == "DELETE_NO_WHERE":
-                if _has_where_after(lines, index):
-                    continue
-
-            if rule.code == "UPDATE_NO_WHERE":
-                if _has_where_after(lines, index):
-                    continue
+            if rule.code in {
+                "DELETE_NO_WHERE",
+                "UPDATE_NO_WHERE",
+            } and _has_where(statement):
+                continue
 
             issues.append(
                 LintIssue(

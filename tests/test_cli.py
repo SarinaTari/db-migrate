@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dbmigrate.cli import main
 
+import sqlite3
+
 
 def write_config(
     path: Path,

@@ -6,13 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .database_factory import create_database
-from .history import MigrationHistory
+from .database import Database
 from .logging_config import get_logger
 from .migration import Migration, discover_migrations
 from .migration_safety import MigrationSafetyChecker
 from .reproducibility import check_reproducibility
-from .validation import ValidationReport, validate_migrations
+from .schema import inspect_schema
+from .validation import validate_migrations
 
 
 class CIError(Exception):
@@ -106,7 +106,7 @@ class CIChecker:
         *,
         project_root: Path,
         migrations_directory: Path,
-        database,
+        database: Database,
     ) -> None:
         self.project_root = project_root
         self.migrations_directory = migrations_directory
@@ -127,23 +127,33 @@ class CIChecker:
             )
 
         self._check_validation(
-            migrations,
-            checks,
-        )
-
-        self._check_database(
             checks
         )
 
-        self._check_safety(
-            migrations,
-            checks,
-        )
+        connected_here = False
 
-        self._check_reproducibility(
-            migrations,
-            checks,
-        )
+        try:
+            if not self.database.is_connected:
+                self.database.connect()
+                connected_here = True
+
+            self._check_database(
+                checks
+            )
+
+            self._check_safety(
+                migrations,
+                checks,
+            )
+
+            self._check_reproducibility(
+                migrations,
+                checks,
+            )
+
+        finally:
+            if connected_here:
+                self.database.close()
 
         return CIReport(
             checks=tuple(checks)
@@ -195,7 +205,6 @@ class CIChecker:
 
     def _check_validation(
         self,
-        migrations: Sequence[Migration],
         checks: list[CICheckResult],
     ) -> None:
         """Validate the migration collection."""
@@ -242,7 +251,6 @@ class CIChecker:
     ) -> None:
         """Check database connectivity."""
         try:
-            self.database.connect()
             version = self.database.version()
 
             checks.append(
@@ -276,9 +284,7 @@ class CIChecker:
                 CICheckResult(
                     name="migration-safety",
                     passed=False,
-                    message=(
-                        "Database is not connected."
-                    ),
+                    message="Database is not connected.",
                 )
             )
             return
@@ -322,20 +328,47 @@ class CIChecker:
         migrations: Sequence[Migration],
         checks: list[CICheckResult],
     ) -> None:
-        """Verify that migrations reproduce the database schema."""
+        """Verify that migrations reproduce the current schema."""
+        if not self.database.is_connected:
+            checks.append(
+                CICheckResult(
+                    name="schema-reproducibility",
+                    passed=False,
+                    message="Database is not connected.",
+                )
+            )
+            return
+
+        if self.database.engine != "sqlite":
+            checks.append(
+                CICheckResult(
+                    name="schema-reproducibility",
+                    passed=False,
+                    message=(
+                        "Schema reproducibility currently "
+                        "supports SQLite only."
+                    ),
+                )
+            )
+            return
+
         try:
-            report = check_reproducibility(
-                self.database,
-                migrations,
+            target_schema = inspect_schema(
+                self.database
             )
 
-            if report.reproducible:
+            report = check_reproducibility(
+                migrations,
+                target_schema,
+            )
+
+            if report.is_reproducible:
                 checks.append(
                     CICheckResult(
                         name="schema-reproducibility",
                         passed=True,
                         message=(
-                            "Migration history reproduces "
+                            "Migrations reproduce "
                             "the current schema."
                         ),
                     )
@@ -346,8 +379,8 @@ class CIChecker:
                         name="schema-reproducibility",
                         passed=False,
                         message=(
-                            "Migration history does not "
-                            "reproduce the current schema."
+                            "Migrations do not reproduce "
+                            "the current schema."
                         ),
                     )
                 )

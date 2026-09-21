@@ -56,16 +56,22 @@ class Migration:
         return self.path.name
 
 
-def _parse_filename(path: Path) -> tuple[int, str]:
+def _parse_filename(
+    path: Path,
+) -> tuple[int, str]:
     """Parse a migration version and name from its filename."""
-    match = MIGRATION_FILENAME_PATTERN.fullmatch(path.name)
+    match = MIGRATION_FILENAME_PATTERN.fullmatch(
+        path.name
+    )
 
     if match is None:
         raise MigrationParseError(
             f"Invalid migration filename: {path.name}"
         )
 
-    version = int(match.group("version"))
+    version = int(
+        match.group("version")
+    )
     name = match.group("name")
 
     if version <= 0:
@@ -87,7 +93,9 @@ def _parse_metadata(
 
     for line in content.splitlines():
         if migration_version is None:
-            version_match = MIGRATION_HEADER_PATTERN.match(line)
+            version_match = MIGRATION_HEADER_PATTERN.match(
+                line
+            )
 
             if version_match is not None:
                 migration_version = int(
@@ -95,10 +103,14 @@ def _parse_metadata(
                 )
 
         if migration_name is None:
-            name_match = MIGRATION_NAME_PATTERN.match(line)
+            name_match = MIGRATION_NAME_PATTERN.match(
+                line
+            )
 
             if name_match is not None:
-                migration_name = name_match.group("name")
+                migration_name = name_match.group(
+                    "name"
+                )
 
         if (
             migration_version is not None
@@ -197,7 +209,9 @@ def _extract_sections(
     return up_sql, down_sql
 
 
-def parse_migration(path: Path) -> Migration:
+def parse_migration(
+    path: Path,
+) -> Migration:
     """Parse one migration file."""
     path = Path(path).resolve()
 
@@ -217,8 +231,8 @@ def parse_migration(path: Path) -> Migration:
             f"{path.name}"
         )
 
-    version_from_filename, name_from_filename = _parse_filename(
-        path
+    version_from_filename, name_from_filename = (
+        _parse_filename(path)
     )
 
     try:
@@ -231,9 +245,11 @@ def parse_migration(path: Path) -> Migration:
             f"{path.name}: {exc}"
         ) from exc
 
-    version_from_metadata, name_from_metadata = _parse_metadata(
-        content,
-        path,
+    version_from_metadata, name_from_metadata = (
+        _parse_metadata(
+            content,
+            path,
+        )
     )
 
     if version_from_filename != version_from_metadata:
@@ -318,6 +334,8 @@ def discover_migrations(
                 f"{migration.version:03d}."
             )
 
-        versions.add(migration.version)
+        versions.add(
+            migration.version
+        )
 
     return tuple(migrations)

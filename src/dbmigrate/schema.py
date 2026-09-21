@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+from typing import Any
 
-from typing import Sequence
-
-from .database import DatabaseError
+from .database import Database, DatabaseError
 
 
 class SchemaInspectionError(Exception):
@@ -182,10 +181,10 @@ def _normalize_sql(sql: str) -> str:
 
 
 def _row_value(
-    row,
+    row: Any,
     key: str,
     index: int,
-):
+) -> Any:
     """Read a value from either a mapping-like or tuple-like row."""
     try:
         return row[key]
@@ -198,7 +197,7 @@ def _row_value(
 
 
 def _database_objects(
-    database,
+    database: Any,
     object_type: str,
 ) -> list[tuple[str, str]]:
     """Return user-defined SQLite objects of one type."""
@@ -227,14 +226,20 @@ def _database_objects(
         for row in rows
     ]
 
+
 def _inspect_columns(
-    database,
+    database: Any,
     table_name: str,
 ) -> tuple[ColumnInfo, ...]:
     """Inspect columns belonging to a table."""
+    escaped_table = table_name.replace(
+        '"',
+        '""',
+    )
+
     try:
         rows = database.fetch_all(
-            f'PRAGMA table_info("{table_name.replace(chr(34), chr(34) * 2)}")'
+            f'PRAGMA table_info("{escaped_table}")'
         )
     except DatabaseError as exc:
         raise SchemaInspectionError(
@@ -282,7 +287,7 @@ def _inspect_columns(
 
 
 def _inspect_indexes(
-    database,
+    database: Any,
     table_name: str,
 ) -> tuple[IndexInfo, ...]:
     """Inspect indexes belonging to a table."""
@@ -327,25 +332,24 @@ def _inspect_indexes(
                 f"'{index_name}': {exc}"
             ) from exc
 
+        # PRAGMA index_info returns the columns in their actual
+        # index sequence. That order is semantically significant
+        # for composite indexes and must not be sorted.
         columns = tuple(
-            sorted(
-                (
-                    str(
-                        _row_value(
-                            column_row,
-                            "name",
-                            2,
-                        )
-                    )
-                    for column_row in column_rows
-                    if _row_value(
-                        column_row,
-                        "name",
-                        2,
-                    )
-                    is not None
+            str(
+                _row_value(
+                    column_row,
+                    "name",
+                    2,
                 )
             )
+            for column_row in column_rows
+            if _row_value(
+                column_row,
+                "name",
+                2,
+            )
+            is not None
         )
 
         indexes.append(
@@ -365,7 +369,7 @@ def _inspect_indexes(
 
 
 def _inspect_foreign_keys(
-    database,
+    database: Any,
     table_name: str,
 ) -> tuple[ForeignKeyInfo, ...]:
     """Inspect foreign keys belonging to a table."""
@@ -418,7 +422,7 @@ def _inspect_foreign_keys(
 
 
 def inspect_schema(
-    database,
+    database: Database,
 ) -> DatabaseSchema:
     """Inspect the current SQLite database schema."""
     try:
@@ -490,7 +494,7 @@ def schema_fingerprint(
 
 
 def inspect_and_fingerprint(
-    database,
+    database: Database,
 ) -> tuple[DatabaseSchema, str]:
     """Inspect a database and return its schema and fingerprint."""
     schema = inspect_schema(

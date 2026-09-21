@@ -81,12 +81,14 @@ class MigrationHistory:
         if applied_at is None:
             applied_at = _utc_timestamp()
 
+        placeholder = self.database.dialect.parameter_placeholder
+
         try:
             self.database.execute(
                 f"""
                 INSERT INTO {self.TABLE_NAME}
                     (version, name, checksum, applied_at)
-                VALUES (?, ?, ?, ?)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
                 """,
                 (
                     version,
@@ -112,11 +114,13 @@ class MigrationHistory:
         self.initialize()
         _validate_version(version)
 
+        placeholder = self.database.dialect.parameter_placeholder
+
         try:
             self.database.execute(
                 f"""
                 DELETE FROM {self.TABLE_NAME}
-                WHERE version = ?
+                WHERE version = {placeholder}
                 """,
                 (version,),
             )
@@ -130,12 +134,14 @@ class MigrationHistory:
         self.initialize()
         _validate_version(version)
 
+        placeholder = self.database.dialect.parameter_placeholder
+
         try:
             row = self.database.fetch_one(
                 f"""
                 SELECT version
                 FROM {self.TABLE_NAME}
-                WHERE version = ?
+                WHERE version = {placeholder}
                 """,
                 (version,),
             )
@@ -151,12 +157,14 @@ class MigrationHistory:
         self.initialize()
         _validate_version(version)
 
+        placeholder = self.database.dialect.parameter_placeholder
+
         try:
             row = self.database.fetch_one(
                 f"""
                 SELECT version, name, checksum, applied_at
                 FROM {self.TABLE_NAME}
-                WHERE version = ?
+                WHERE version = {placeholder}
                 """,
                 (version,),
             )

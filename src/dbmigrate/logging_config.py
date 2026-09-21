@@ -18,17 +18,21 @@ class LoggingOptions:
     verbose: bool = False
 
 
-def get_logger(name: str | None = None) -> logging.Logger:
+def get_logger(
+    name: str | None = None,
+) -> logging.Logger:
     """Return a dbmigrate logger."""
     if name is None:
         return logging.getLogger(LOGGER_NAME)
 
-    return logging.getLogger(f"{LOGGER_NAME}.{name}")
+    return logging.getLogger(
+        f"{LOGGER_NAME}.{name}"
+    )
 
 
 def configure_logging(
     options: LoggingOptions | str | None = None,
-) -> None:
+) -> logging.Logger:
     """Configure centralized CLI logging.
 
     ``options`` may be either a ``LoggingOptions`` instance or a
@@ -38,7 +42,9 @@ def configure_logging(
         options = LoggingOptions()
 
     if isinstance(options, str):
-        options = LoggingOptions(level=options)
+        options = LoggingOptions(
+            level=options
+        )
 
     level_name = options.level.upper()
 
@@ -47,14 +53,20 @@ def configure_logging(
     elif options.verbose:
         level_name = "DEBUG"
 
-    level = getattr(logging, level_name, None)
+    level = getattr(
+        logging,
+        level_name,
+        None,
+    )
 
     if not isinstance(level, int):
         raise ValueError(
             f"Unknown logging level: {options.level}"
         )
 
-    logger = logging.getLogger(LOGGER_NAME)
+    logger = logging.getLogger(
+        LOGGER_NAME
+    )
     logger.setLevel(level)
 
     handler = None
@@ -70,7 +82,12 @@ def configure_logging(
 
     if handler is None:
         handler = logging.StreamHandler()
-        handler._dbmigrate_handler = True  # type: ignore[attr-defined]
+
+        setattr(
+            handler,
+            "_dbmigrate_handler",
+            True,
+        )
 
         handler.setFormatter(
             logging.Formatter(
@@ -81,7 +98,6 @@ def configure_logging(
         logger.addHandler(handler)
 
     handler.setLevel(level)
-
     logger.propagate = False
 
     return logger

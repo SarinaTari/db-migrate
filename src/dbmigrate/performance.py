@@ -5,9 +5,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 import time
-from typing import Iterator
+from typing import Callable, Iterator, TypeVar
 
 from .logging_config import get_logger
+
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -47,8 +50,8 @@ def measure(
 
 def measure_call(
     operation: str,
-    callback,
-):
+    callback: Callable[[], T],
+) -> T:
     """Measure and execute a callable."""
     start = time.perf_counter()
 

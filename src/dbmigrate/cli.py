@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Any
 
 from . import __version__
 from .commands.base import (
@@ -13,19 +14,21 @@ from .commands.base import (
 )
 from .config import (
     ConfigurationError,
+    ProjectConfig,
     load_config,
 )
+from .database import Database
 from .database_factory import (
     create_database,
 )
 from .history import (
-    HistoryError,
     MigrationHistory,
 )
 from .linter import (
     lint_migrations,
 )
 from .logging_config import (
+    LoggingOptions,
     configure_logging,
 )
 from .migration import (
@@ -39,14 +42,12 @@ from .migration_creator import (
 )
 from .planner import (
     MigrationPlanner,
-    MigrationPlanningError,
 )
 from .runner import (
     MigrationRunner,
     MigrationRunnerError,
 )
 from .status import (
-    MigrationStatusError,
     MigrationStatusInspector,
 )
 from .validation import (
@@ -132,14 +133,11 @@ def _configure_logging(
     args: argparse.Namespace,
 ) -> None:
     """Configure CLI logging."""
-    if args.quiet:
-        options = "ERROR"
-    elif args.verbose:
-        options = "DEBUG"
-    elif args.log_level is not None:
-        options = args.log_level
-    else:
-        options = "WARNING"
+    options = LoggingOptions(
+        level=args.log_level or "WARNING",
+        quiet=args.quiet,
+        verbose=args.verbose,
+    )
 
     configure_logging(options)
 
@@ -163,35 +161,29 @@ def run_command(
         )
         return 1
 
-    if command.name == "create":
-        return _run_create(config, args.name)
+    handlers = {
+        "create": lambda: _run_create(
+            config,
+            args.name,
+        ),
+        "validate": lambda: _run_validate(config),
+        "check": lambda: _run_check(config),
+        "up": lambda: _run_up(config),
+        "down": lambda: _run_down(
+            config,
+            args.steps,
+        ),
+        "history": lambda: _run_history(config),
+        "current": lambda: _run_current(config),
+        "status": lambda: _run_status(config),
+        "plan": lambda: _run_plan(config),
+        "lint": lambda: _run_lint(config),
+    }
 
-    if command.name == "validate":
-        return _run_validate(config)
+    handler = handlers.get(command.name)
 
-    if command.name == "check":
-        return _run_check(config)
-
-    if command.name == "up":
-        return _run_up(config)
-
-    if command.name == "down":
-        return _run_down(config, args.steps)
-
-    if command.name == "history":
-        return _run_history(config)
-
-    if command.name == "current":
-        return _run_current(config)
-
-    if command.name == "status":
-        return _run_status(config)
-
-    if command.name == "plan":
-        return _run_plan(config)
-
-    if command.name == "lint":
-        return _run_lint(config)
+    if handler is not None:
+        return handler()
 
     print(
         f"Command '{command.name}' is not implemented yet. "
@@ -212,7 +204,7 @@ def _run_init() -> int:
 
 
 def _run_create(
-    config,
+    config: ProjectConfig,
     name: str,
 ) -> int:
     """Create a new migration."""
@@ -238,7 +230,9 @@ def _run_create(
     return 0
 
 
-def _run_validate(config) -> int:
+def _run_validate(
+    config: ProjectConfig,
+) -> int:
     """Run migration validation."""
     try:
         report = validate_migrations(
@@ -281,22 +275,21 @@ def _run_validate(config) -> int:
     return 0
 
 
-def _create_database(database_url: str):
+def _create_database(
+    database_url: str,
+) -> Database:
     """Create a database implementation from a database URL."""
-    try:
-        return create_database(database_url)
-    except Exception as exc:
-        print(
-            f"Database check failed: {exc}",
-            file=sys.stderr,
-        )
-        return None
+    return create_database(
+        database_url
+    )
 
 
-def _run_check(config) -> int:
+def _run_check(
+    config: ProjectConfig,
+) -> int:
     """Check database connectivity."""
     try:
-        database = create_database(
+        database = _create_database(
             config.database_url
         )
     except Exception as exc:
@@ -312,11 +305,15 @@ def _run_check(config) -> int:
         version = database.version()
 
         print("Database connection: OK")
+
         engine_name = database.engine
 
         if engine_name.lower() == "sqlite":
             engine_name = "SQLite"
-        elif engine_name.lower() in {"postgres", "postgresql"}:
+        elif engine_name.lower() in {
+            "postgres",
+            "postgresql",
+        }:
             engine_name = "PostgreSQL"
         elif engine_name.lower() == "mysql":
             engine_name = "MySQL"
@@ -325,7 +322,12 @@ def _run_check(config) -> int:
             f"Database engine: "
             f"{engine_name}"
         )
-        print(f"SQLite version: {database.version()}")
+
+        # Keep this output stable for the existing CLI contract.
+        print(
+            f"SQLite version: "
+            f"{version}"
+        )
 
         return 0
 
@@ -340,7 +342,9 @@ def _run_check(config) -> int:
         database.close()
 
 
-def _load_migrations(config):
+def _load_migrations(
+    config: ProjectConfig,
+):
     """Load migration files."""
     try:
         return discover_migrations(
@@ -349,16 +353,16 @@ def _load_migrations(config):
     except (
         MigrationDiscoveryError,
         MigrationParseError,
-    ) as exc:
-        raise MigrationRunnerError(
-            f"Could not load migrations: {exc}"
-        ) from exc
+    ):
+        raise
 
 
-def _run_up(config) -> int:
+def _run_up(
+    config: ProjectConfig,
+) -> int:
     """Apply all pending migrations."""
     try:
-        database = create_database(
+        database = _create_database(
             config.database_url
         )
     except Exception as exc:
@@ -371,9 +375,13 @@ def _run_up(config) -> int:
     try:
         database.connect()
 
-        migrations = _load_migrations(config)
+        migrations = _load_migrations(
+            config
+        )
 
-        runner = MigrationRunner(database)
+        runner = MigrationRunner(
+            database
+        )
 
         applied = runner.apply_all(
             migrations
@@ -391,9 +399,7 @@ def _run_up(config) -> int:
 
         return 0
 
-    except (
-        Exception,
-    ) as exc:
+    except Exception as exc:
         print(
             f"Error: {exc}",
             file=sys.stderr,
@@ -405,7 +411,7 @@ def _run_up(config) -> int:
 
 
 def _run_down(
-    config,
+    config: ProjectConfig,
     steps: int,
 ) -> int:
     """Roll back applied migrations."""
@@ -417,7 +423,7 @@ def _run_down(
         return 1
 
     try:
-        database = create_database(
+        database = _create_database(
             config.database_url
         )
     except Exception as exc:
@@ -430,9 +436,13 @@ def _run_down(
     try:
         database.connect()
 
-        migrations = _load_migrations(config)
+        migrations = _load_migrations(
+            config
+        )
 
-        runner = MigrationRunner(database)
+        runner = MigrationRunner(
+            database
+        )
 
         results = runner.rollback_steps(
             migrations,
@@ -462,10 +472,12 @@ def _run_down(
         database.close()
 
 
-def _run_history(config) -> int:
+def _run_history(
+    config: ProjectConfig,
+) -> int:
     """Show migration history."""
     try:
-        database = create_database(
+        database = _create_database(
             config.database_url
         )
     except Exception as exc:
@@ -478,9 +490,13 @@ def _run_history(config) -> int:
     try:
         database.connect()
 
-        migrations = _load_migrations(config)
+        migrations = _load_migrations(
+            config
+        )
 
-        runner = MigrationRunner(database)
+        runner = MigrationRunner(
+            database
+        )
 
         applied = runner.applied(
             migrations
@@ -511,10 +527,12 @@ def _run_history(config) -> int:
         database.close()
 
 
-def _run_current(config) -> int:
+def _run_current(
+    config: ProjectConfig,
+) -> int:
     """Show the current migration version."""
     try:
-        database = create_database(
+        database = _create_database(
             config.database_url
         )
     except Exception as exc:
@@ -527,9 +545,13 @@ def _run_current(config) -> int:
     try:
         database.connect()
 
-        migrations = _load_migrations(config)
+        migrations = _load_migrations(
+            config
+        )
 
-        runner = MigrationRunner(database)
+        runner = MigrationRunner(
+            database
+        )
 
         applied = runner.applied(
             migrations
@@ -561,10 +583,12 @@ def _run_current(config) -> int:
         database.close()
 
 
-def _run_status(config) -> int:
+def _run_status(
+    config: ProjectConfig,
+) -> int:
     """Show migration status."""
     try:
-        database = create_database(
+        database = _create_database(
             config.database_url
         )
     except Exception as exc:
@@ -577,9 +601,13 @@ def _run_status(config) -> int:
     try:
         database.connect()
 
-        migrations = _load_migrations(config)
+        migrations = _load_migrations(
+            config
+        )
 
-        runner = MigrationRunner(database)
+        runner = MigrationRunner(
+            database
+        )
 
         inspector = MigrationStatusInspector(
             runner
@@ -664,19 +692,33 @@ def _run_status(config) -> int:
         database.close()
 
 
-def _run_plan(config) -> int:
+def _run_plan(
+    config: ProjectConfig,
+) -> int:
     """Show pending migrations without executing them."""
+    database: Database | None = None
+
     try:
-        database = create_database(
+        database = _create_database(
             config.database_url
         )
         database.connect()
 
-        migrations = _load_migrations(config)
-        history = MigrationHistory(database)
-        planner = MigrationPlanner(history)
+        migrations = _load_migrations(
+            config
+        )
 
-        plan = planner.plan(migrations)
+        history = MigrationHistory(
+            database
+        )
+
+        planner = MigrationPlanner(
+            history
+        )
+
+        plan = planner.plan(
+            migrations
+        )
 
         print("Migration plan")
         print("==============")
@@ -697,9 +739,7 @@ def _run_plan(config) -> int:
 
         return 0
 
-    except (
-        Exception,
-    ) as exc:
+    except Exception as exc:
         print(
             f"Error: {exc}",
             file=sys.stderr,
@@ -707,17 +747,33 @@ def _run_plan(config) -> int:
         return 1
 
     finally:
-        if "database" in locals():
+        if database is not None:
             database.close()
 
 
-def _run_lint(config) -> int:
+def _run_lint(
+    config: ProjectConfig,
+) -> int:
     """Lint migration files."""
     try:
-        migrations = _load_migrations(config)
+        migrations = _load_migrations(
+            config
+        )
+
         report = lint_migrations(
             migrations
         )
+
+    except (
+        MigrationDiscoveryError,
+        MigrationParseError,
+    ) as exc:
+        print(
+            f"Lint error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
     except Exception as exc:
         print(
             f"Lint error: {exc}",

@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tempfile
+from typing import Sequence
 
-from .database import SQLiteDatabase, DatabaseError
+from .database import DatabaseError, SQLiteDatabase
 from .migration import Migration
 from .runner import MigrationRunner, MigrationRunnerError
 from .schema import (
@@ -47,70 +48,56 @@ class ReproducibilityReport:
         return self.actual.fingerprint()
 
 
-def _create_temporary_database() -> SQLiteDatabase:
-    """Create a temporary SQLite database."""
-    temporary_directory = tempfile.TemporaryDirectory()
-
+def _create_temporary_database(
+    temporary_directory: str | Path,
+) -> SQLiteDatabase:
+    """Create a temporary SQLite database in the supplied directory."""
     path = (
-        Path(temporary_directory.name)
+        Path(temporary_directory)
         / "reproducibility.db"
     )
 
-    database = SQLiteDatabase(path)
-
-    # Keep the temporary directory alive for the lifetime
-    # of the database object.
-    database._reproducibility_directory = (
-        temporary_directory
-    )
-
-    return database
+    return SQLiteDatabase(path)
 
 
 def reproduce_schema(
-    migrations: list[Migration],
+    migrations: Sequence[Migration],
 ) -> DatabaseSchema:
     """Apply all migrations to a fresh SQLite database."""
-    database = _create_temporary_database()
-
-    try:
-        database.connect()
-
-        runner = MigrationRunner(
-            database
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        database = _create_temporary_database(
+            temporary_directory
         )
 
-        runner.apply_all(
-            migrations
-        )
+        try:
+            database.connect()
 
-        return inspect_schema(
-            database
-        )
+            runner = MigrationRunner(
+                database
+            )
 
-    except (
-        DatabaseError,
-        MigrationRunnerError,
-    ) as exc:
-        raise ReproducibilityError(
-            f"Could not reproduce schema from migrations: {exc}"
-        ) from exc
+            runner.apply_all(
+                migrations
+            )
 
-    finally:
-        database.close()
+            return inspect_schema(
+                database
+            )
 
-        temporary_directory = getattr(
-            database,
-            "_reproducibility_directory",
-            None,
-        )
+        except (
+            DatabaseError,
+            MigrationRunnerError,
+        ) as exc:
+            raise ReproducibilityError(
+                f"Could not reproduce schema from migrations: {exc}"
+            ) from exc
 
-        if temporary_directory is not None:
-            temporary_directory.cleanup()
+        finally:
+            database.close()
 
 
 def check_reproducibility(
-    migrations: list[Migration],
+    migrations: Sequence[Migration],
     target_schema: DatabaseSchema,
 ) -> ReproducibilityReport:
     """Check whether migrations reproduce a target schema."""
