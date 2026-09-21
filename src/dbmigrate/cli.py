@@ -30,6 +30,10 @@ from .validation import validate_migrations
 from .linter import lint_migrations
 from .explainer import explain_migrations
 from .impact import analyze_migrations
+from .schema import (
+    SchemaInspectionError,
+    inspect_schema,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -139,6 +143,12 @@ def run_command(
 
     if command.name == "impact":
         return _run_impact(config)
+
+    if command.name == "schema":
+        return _run_schema(config)
+
+    if command.name == "fingerprint":
+        return _run_fingerprint(config)
 
     print(
         f"Command '{command.name}' is not implemented yet. "
@@ -985,6 +995,170 @@ def _run_impact(config) -> int:
         )
         return 1
 
+def _run_schema(config) -> int:
+    """Inspect the current database schema."""
+    database = _create_database(
+        config.database_url
+    )
+
+    if database is None:
+        return 1
+
+    try:
+        database.connect()
+
+        schema = inspect_schema(
+            database
+        )
+
+        print("Database schema")
+        print("================")
+
+        if schema.is_empty:
+            print("\nNo user-defined schema objects found.")
+            return 0
+
+        if schema.tables:
+            print("\nTables:")
+
+            for table in schema.tables:
+                print(
+                    f"\n  {table.name}"
+                )
+
+                print("    Columns:")
+
+                for column in table.columns:
+                    nullable = (
+                        "NOT NULL"
+                        if column.not_null
+                        else "NULL"
+                    )
+
+                    primary_key = (
+                        " PRIMARY KEY"
+                        if column.primary_key_position
+                        else ""
+                    )
+
+                    print(
+                        f"      {column.name}: "
+                        f"{column.data_type or 'UNSPECIFIED'} "
+                        f"{nullable}"
+                        f"{primary_key}"
+                    )
+
+                if table.indexes:
+                    print("    Indexes:")
+
+                    for index in table.indexes:
+                        unique = (
+                            " UNIQUE"
+                            if index.unique
+                            else ""
+                        )
+
+                        columns = ", ".join(
+                            index.columns
+                        )
+
+                        print(
+                            f"      {index.name}"
+                            f"{unique}"
+                            f" ({columns})"
+                        )
+
+                if table.foreign_keys:
+                    print(
+                        "    Foreign keys:"
+                    )
+
+                    for foreign_key in (
+                        table.foreign_keys
+                    ):
+                        print(
+                            f"      "
+                            f"{foreign_key.column} -> "
+                            f"{foreign_key.referenced_table}"
+                            f"({foreign_key.referenced_column})"
+                            f" "
+                            f"ON DELETE "
+                            f"{foreign_key.on_delete}"
+                        )
+
+        if schema.views:
+            print("\nViews:")
+
+            for view in schema.views:
+                print(
+                    f"  {view.name}"
+                )
+
+        print(
+            f"\nTables: {schema.table_count}"
+        )
+
+        print(
+            f"Views: {schema.view_count}"
+        )
+
+        return 0
+
+    except (
+        DatabaseError,
+        SchemaInspectionError,
+    ) as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    finally:
+        database.close()
+
+
+def _run_fingerprint(config) -> int:
+    """Show the current database schema fingerprint."""
+    database = _create_database(
+        config.database_url
+    )
+
+    if database is None:
+        return 1
+
+    try:
+        database.connect()
+
+        schema = inspect_schema(
+            database
+        )
+
+        print(
+            "Database schema fingerprint"
+        )
+        print(
+            "==========================="
+        )
+
+        print(
+            f"\n{schema.fingerprint()}"
+        )
+
+        return 0
+
+    except (
+        DatabaseError,
+        SchemaInspectionError,
+    ) as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    finally:
+        database.close()
     
 def main(
     argv: list[str] | None = None,
