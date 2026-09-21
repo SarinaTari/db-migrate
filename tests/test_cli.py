@@ -289,7 +289,7 @@ def test_check_sqlite_database(
     assert "SQLite version:" in captured.out
 
 
-def test_check_rejects_non_sqlite_database(
+def test_check_accepts_postgresql_database_url(
     tmp_path: Path,
     monkeypatch,
     capsys,
@@ -298,16 +298,21 @@ def test_check_rejects_non_sqlite_database(
 
     write_config(
         tmp_path / "dbmigrate.toml",
-        database_url="postgresql://localhost/example",
+        database_url=(
+            "postgresql://user:password@localhost/example"
+        ),
     )
 
     exit_code = main(["check"])
-
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "sqlite:/// database URLs" in captured.err
-
+    assert (
+        "Database check failed:"
+        in captured.err
+        or "Could not connect"
+        in captured.err
+    )
 
 def test_up_with_no_migrations_reports_no_pending(
     tmp_path: Path,

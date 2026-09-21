@@ -39,6 +39,8 @@ from .reproducibility import (
     check_reproducibility,
 )
 from .schema import inspect_schema
+from .database import DatabaseError
+from .database_factory import create_database
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -298,36 +300,16 @@ def _create_database(
     database_url: str,
 ):
     """Create a database implementation."""
-    prefix = "sqlite:///"
-
-    if not database_url.startswith(
-        prefix
-    ):
+    try:
+        return create_database(
+            database_url
+        )
+    except DatabaseError as exc:
         print(
-            "Configuration error: Phase 10 supports only "
-            "sqlite:/// database URLs.",
+            f"Configuration error: {exc}",
             file=sys.stderr,
         )
         return None
-
-    raw_path = database_url[
-        len(prefix):
-    ]
-
-    if not raw_path:
-        print(
-            "Configuration error: "
-            "SQLite database path is empty.",
-            file=sys.stderr,
-        )
-        return None
-
-    path = Path(raw_path)
-
-    if not path.is_absolute():
-        path = Path.cwd() / path
-
-    return SQLiteDatabase(path)
 
 
 def _load_migrations(config):
@@ -423,6 +405,7 @@ def _run_plan(config) -> int:
 
 def _run_check(config) -> int:
     """Check database connectivity."""
+
     database = _create_database(
         config.database_url
     )
@@ -433,27 +416,40 @@ def _run_check(config) -> int:
     try:
         database.connect()
 
-        row = database.fetch_one(
-            "SELECT sqlite_version()"
+        version = database.version()
+
+        engine_names = {
+            "sqlite": "SQLite",
+            "postgresql": "PostgreSQL",
+            "mysql": "MySQL",
+        }
+
+        engine_name = engine_names.get(
+            database.engine,
+            database.engine,
         )
 
-        if row is None:
-            raise DatabaseError(
-                "SQLite did not return a version."
+        print("Database connection: OK")
+        print(
+            f"Database engine: {engine_name}"
+        )
+
+        if database.engine == "sqlite":
+            print(
+                f"SQLite version: {version}"
             )
-
-        print(
-            "Database connection: OK"
-        )
-        print(
-            "Database engine: SQLite"
-        )
-        print(
-            f"SQLite version: {row[0]}"
-        )
-        print(
-            f"Database path: {database.path}"
-        )
+        elif database.engine == "postgresql":
+            print(
+                f"PostgreSQL version: {version}"
+            )
+        elif database.engine == "mysql":
+            print(
+                f"MySQL version: {version}"
+            )
+        else:
+            print(
+                f"Database version: {version}"
+            )
 
         return 0
 
@@ -467,7 +463,7 @@ def _run_check(config) -> int:
     finally:
         database.close()
 
-
+                
 def _run_up(config) -> int:
     """Apply all pending migrations."""
     database = _create_database(

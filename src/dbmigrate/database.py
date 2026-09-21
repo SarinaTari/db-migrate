@@ -6,7 +6,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import sqlite3
 from types import TracebackType
-from typing import Any, Iterable, Self
+from typing import Any, Iterable
+
+from .database_capabilities import DatabaseCapabilities
+from .database_dialect import (
+    DatabaseDialect,
+    SQLiteDialect,
+)
 
 
 class DatabaseError(Exception):
@@ -15,6 +21,21 @@ class DatabaseError(Exception):
 
 class Database(ABC):
     """Abstract database interface used by dbmigrate."""
+
+    @property
+    @abstractmethod
+    def engine(self) -> str:
+        """Return the database engine name."""
+
+    @property
+    @abstractmethod
+    def dialect(self) -> DatabaseDialect:
+        """Return the SQL dialect."""
+
+    @property
+    @abstractmethod
+    def capabilities(self) -> DatabaseCapabilities:
+        """Return supported database capabilities."""
 
     @abstractmethod
     def connect(self) -> None:
@@ -57,8 +78,16 @@ class Database(ABC):
         """Roll back the current transaction."""
 
     @abstractmethod
+    def begin(self) -> None:
+        """Begin an explicit transaction."""
+
+    @abstractmethod
     def transaction(self) -> "Transaction":
         """Return a transaction context manager."""
+
+    @abstractmethod
+    def version(self) -> str:
+        """Return the database engine version."""
 
 
 class Transaction(ABC):
@@ -105,15 +134,41 @@ class SQLiteTransaction(Transaction):
 class SQLiteDatabase(Database):
     """SQLite implementation of the database interface."""
 
+    _CAPABILITIES = DatabaseCapabilities(
+        transactional_ddl=True,
+        drop_column=True,
+        schemas=False,
+        advisory_locks=False,
+    )
+
+    _DIALECT = SQLiteDialect()
+
     def __init__(self, path: Path) -> None:
         self.path = path.expanduser().resolve()
         self._connection: sqlite3.Connection | None = None
 
     @property
+    def engine(self) -> str:
+        """Return the database engine name."""
+        return "sqlite"
+
+    @property
+    def dialect(self) -> DatabaseDialect:
+        """Return the SQLite SQL dialect."""
+        return self._DIALECT
+
+    @property
+    def capabilities(self) -> DatabaseCapabilities:
+        """Return SQLite capabilities."""
+        return self._CAPABILITIES
+
+    @property
     def connection(self) -> sqlite3.Connection:
         """Return the active SQLite connection."""
         if self._connection is None:
-            raise DatabaseError("Database is not connected.")
+            raise DatabaseError(
+                "Database is not connected."
+            )
 
         return self._connection
 
@@ -260,6 +315,19 @@ class SQLiteDatabase(Database):
             raise DatabaseError(
                 f"Could not begin SQLite transaction: {exc}"
             ) from exc
+
+    def version(self) -> str:
+        """Return the SQLite version."""
+        row = self.fetch_one(
+            self.dialect.version_query()
+        )
+
+        if row is None:
+            raise DatabaseError(
+                "SQLite did not return a version."
+            )
+
+        return str(row[0])
 
     def transaction(self) -> SQLiteTransaction:
         """Return a SQLite transaction context manager."""
