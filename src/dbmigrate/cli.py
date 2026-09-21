@@ -5,49 +5,55 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+from typing import Sequence
 
 from . import __version__
-from .commands.base import Command, get_commands, resolve_command
-from .config import ConfigurationError, load_config
-from .database import DatabaseError, SQLiteDatabase
-from .history import HistoryError, MigrationHistory
+from .commands.base import (
+    get_commands,
+    resolve_command,
+)
+from .config import (
+    ConfigurationError,
+    load_config,
+)
+from .database import DatabaseError
+from .database_factory import create_database
+from .database_lock import (
+    MigrationLockError,
+    create_migration_lock,
+)
+from .doctor import DatabaseDoctor
+from .history import (
+    HistoryError,
+    MigrationHistory,
+)
 from .migration import (
     MigrationDiscoveryError,
     MigrationParseError,
     discover_migrations,
 )
-from .migration_creator import (
-    MigrationCreationError,
-    create_migration,
+from .migration_safety import (
+    MigrationSafetyChecker,
+    MigrationSafetyError,
 )
-from .planner import MigrationPlanner, MigrationPlanningError
-from .runner import MigrationRunner, MigrationRunnerError
+from .runner import (
+    MigrationRunner,
+    MigrationRunnerError,
+)
 from .status import (
     MigrationStatusError,
     MigrationStatusInspector,
 )
 from .validation import validate_migrations
-from .linter import lint_migrations
-from .explainer import explain_migrations
-from .impact import analyze_migrations
-from .schema import (
-    SchemaInspectionError,
-    inspect_schema,
-)
-from .reproducibility import (
-    ReproducibilityError,
-    check_reproducibility,
-)
-from .schema import inspect_schema
-from .database import DatabaseError
-from .database_factory import create_database
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the dbmigrate argument parser."""
     parser = argparse.ArgumentParser(
         prog="dbmigrate",
-        description="Database migration and schema-evolution tool.",
+        description=(
+            "Database migration and schema-evolution tool."
+        ),
     )
 
     parser.add_argument(
@@ -72,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
         if command.name == "create":
             command_parser.add_argument(
                 "name",
-                help="Name of the migration to create.",
+                help="Migration name.",
             )
 
         if command.name == "down":
@@ -86,216 +92,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_args(
-    argv: list[str] | None = None,
-) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    return build_parser().parse_args(argv)
-
-
-def run_command(
-    command: Command,
-    args: argparse.Namespace,
-) -> int:
-    """Dispatch a resolved command."""
-    if command.name == "init":
-        return _run_init()
-
-    if command.name == "create":
-        return _run_create(
-            args.name
-        )
-
-    try:
-        config = load_config()
-    except ConfigurationError as exc:
-        print(
-            f"Configuration error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    if command.name == "validate":
-        return _run_validate(config)
-
-    if command.name == "check":
-        return _run_check(config)
-
-    if command.name == "plan":
-        return _run_plan(config)
-
-    if command.name == "lint":
-        return _run_lint(config)
-
-    if command.name == "up":
-        return _run_up(config)
-
-    if command.name == "down":
-        return _run_down(
-            config,
-            args.steps,
-        )
-
-    if command.name == "history":
-        return _run_history(config)
-
-    if command.name == "current":
-        return _run_current(config)
-
-    if command.name == "status":
-        return _run_status(config)
-
-    if command.name == "explain":
-        return _run_explain(config)
-
-    if command.name == "impact":
-        return _run_impact(config)
-
-    if command.name == "schema":
-        return _run_schema(config)
-
-    if command.name == "fingerprint":
-        return _run_fingerprint(config)
-
-    if command.name == "schema-diff":
-        return _run_schema_diff(config)
-
-    print(
-        f"Command '{command.name}' is not implemented yet. "
-        "This command will be introduced in a later phase."
-    )
-
-    return 0
-
-
-def _run_init() -> int:
-    """Run the init command."""
-    print(
-        "Command 'init' is not implemented yet. "
-        "Project initialization will be introduced in a later phase."
-    )
-
-    return 0
-
-
-def _run_create(
-    name: str,
-) -> int:
-    """Create a new migration."""
-    try:
-        config = load_config()
-    except ConfigurationError as exc:
-        print(
-            f"Configuration error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
-        migration = create_migration(
-            config.migrations_path,
-            name,
-        )
-    except MigrationCreationError as exc:
-        print(
-            f"Error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    print(
-        f"Created migration "
-        f"{migration.identifier}."
-    )
-    print(
-        f"File: "
-        f"{migration.path}"
-    )
-
-    return 0
-
-
-def _run_validate(config) -> int:
-    """Run migration validation."""
-    try:
-        report = validate_migrations(
-            config.migrations_path
-        )
-    except OSError as exc:
-        print(
-            "Validation error: could not access "
-            f"migrations directory: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
-        return 1
-
-    try:
-        database.connect()
-
-        history = MigrationHistory(
-            database
-        )
-
-        records = history.list_applied()
-
-        report = validate_migrations(
-            config.migrations_path,
-            records=records,
-        )
-
-    except (
-        DatabaseError,
-        HistoryError,
-    ) as exc:
-        print(
-            f"Validation error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    finally:
-        database.close()
-
-    print(
-        "Migration directory: "
-        f"{config.migrations_path}"
-    )
-
-    print(
-        "Migrations discovered: "
-        f"{len(report.migrations)}"
-    )
-
-    for migration in report.migrations:
-        print(
-            f"  {migration.version:03d} "
-            f"{migration.name}"
-        )
-
-    if report.errors:
-        print("\nValidation failed:")
-
-        for error in report.errors:
-            print(
-                f"  - {error}"
-            )
-
-        return 1
-
-    print(
-        "\nMigration validation passed."
-    )
-
-    return 0
-
-
 def _create_database(
     database_url: str,
 ):
@@ -304,6 +100,7 @@ def _create_database(
         return create_database(
             database_url
         )
+
     except DatabaseError as exc:
         print(
             f"Configuration error: {exc}",
@@ -312,12 +109,15 @@ def _create_database(
         return None
 
 
-def _load_migrations(config):
-    """Load migration files."""
+def _load_migrations(
+    config,
+):
+    """Discover and parse migration files."""
     try:
         return discover_migrations(
             config.migrations_path
         )
+
     except (
         MigrationDiscoveryError,
         MigrationParseError,
@@ -327,85 +127,69 @@ def _load_migrations(config):
         ) from exc
 
 
-def _run_plan(config) -> int:
-    """Show the migrations that would be applied."""
-    database = _create_database(
-        config.database_url
+def _run_init(
+    config,
+) -> int:
+    """Initialize a migration project."""
+    print(
+        "The project is already initialized."
     )
+    return 0
 
-    if database is None:
-        return 1
 
+def _run_validate(
+    config,
+) -> int:
+    """Validate migration files."""
     try:
-        database.connect()
-
         migrations = _load_migrations(
             config
         )
 
-        history = MigrationHistory(
-            database
-        )
-
-        planner = MigrationPlanner(
-            history
-        )
-
-        plan = planner.plan(
+        errors = validate_migrations(
             migrations
         )
 
         print(
-            "Migration plan"
-        )
-        print(
-            "==============="
+            f"Migration directory: "
+            f"{config.migrations_path}"
         )
 
-        if plan.is_empty:
-            print(
-                "\nNo pending migrations."
-            )
-            print(
-                "No changes would be made to the database."
-            )
-            return 0
-
         print(
-            f"\nPending migrations: "
-            f"{plan.count}"
+            f"Discovered migrations: "
+            f"{len(migrations)}"
         )
 
-        for migration in plan.pending:
+        if errors:
             print(
-                f"  {migration.version:03d} "
-                f"{migration.name}"
+                "Migration validation failed:",
+                file=sys.stderr,
             )
 
+            for error in errors:
+                print(
+                    f"- {error}",
+                    file=sys.stderr,
+                )
+
+            return 1
+
         print(
-            "\nNo changes were made to the database."
+            "Migration validation: OK"
         )
 
         return 0
 
-    except (
-        DatabaseError,
-        MigrationRunnerError,
-        MigrationPlanningError,
-    ) as exc:
+    except MigrationRunnerError as exc:
         print(
-            f"Error: {exc}",
+            f"Migration validation failed: {exc}",
             file=sys.stderr,
         )
         return 1
 
-    finally:
-        database.close()
-
 
 def _run_check(config) -> int:
     """Check database connectivity."""
-
     database = _create_database(
         config.database_url
     )
@@ -451,6 +235,11 @@ def _run_check(config) -> int:
                 f"Database version: {version}"
             )
 
+        if hasattr(database, "path"):
+            print(
+                f"Database path: {database.path}"
+            )
+
         return 0
 
     except DatabaseError as exc:
@@ -463,9 +252,11 @@ def _run_check(config) -> int:
     finally:
         database.close()
 
-                
-def _run_up(config) -> int:
-    """Apply all pending migrations."""
+
+def _run_up(
+    config,
+) -> int:
+    """Apply pending migrations."""
     database = _create_database(
         config.database_url
     )
@@ -480,13 +271,26 @@ def _run_up(config) -> int:
             config
         )
 
-        runner = MigrationRunner(
+        safety_checker = MigrationSafetyChecker(
             database
         )
 
-        applied = runner.apply_all(
+        safety_checker.require_safe(
             migrations
         )
+
+        lock = create_migration_lock(
+            database
+        )
+
+        with lock:
+            runner = MigrationRunner(
+                database
+            )
+
+            applied = runner.apply_all(
+                migrations
+            )
 
         if not applied:
             print(
@@ -494,20 +298,21 @@ def _run_up(config) -> int:
             )
             return 0
 
-        for result in applied:
+        for migration in applied:
             print(
-                f"Applied "
-                f"{result.migration.identifier}."
+                f"Applied {migration.identifier}."
             )
 
         return 0
 
     except (
-        DatabaseError,
         MigrationRunnerError,
+        MigrationSafetyError,
+        MigrationLockError,
+        DatabaseError,
     ) as exc:
         print(
-            f"Error: {exc}",
+            f"Migration failed: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -520,10 +325,11 @@ def _run_down(
     config,
     steps: int,
 ) -> int:
-    """Roll back applied migrations."""
-    if steps < 1:
+    """Roll back migrations."""
+    if steps <= 0:
         print(
-            "Error: --steps must be greater than zero.",
+            "The number of rollback steps must be "
+            "greater than zero.",
             file=sys.stderr,
         )
         return 1
@@ -542,35 +348,50 @@ def _run_down(
             config
         )
 
-        runner = MigrationRunner(
+        safety_checker = MigrationSafetyChecker(
             database
         )
 
-        results = runner.rollback_steps(
-            migrations,
-            steps,
+        safety_checker.require_safe(
+            migrations
         )
 
-        if not results:
+        lock = create_migration_lock(
+            database
+        )
+
+        with lock:
+            runner = MigrationRunner(
+                database
+            )
+
+            rolled_back = runner.rollback_steps(
+                migrations,
+                steps,
+            )
+
+        if not rolled_back:
             print(
                 "No applied migrations."
             )
             return 0
 
-        for result in results:
+        for migration in rolled_back:
             print(
                 f"Rolled back "
-                f"{result.migration.identifier}."
+                f"{migration.identifier}."
             )
 
         return 0
 
     except (
-        DatabaseError,
         MigrationRunnerError,
+        MigrationSafetyError,
+        MigrationLockError,
+        DatabaseError,
     ) as exc:
         print(
-            f"Error: {exc}",
+            f"Rollback failed: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -579,8 +400,10 @@ def _run_down(
         database.close()
 
 
-def _run_history(config) -> int:
-    """Show migration history."""
+def _run_history(
+    config,
+) -> int:
+    """Display migration history."""
     database = _create_database(
         config.database_url
     )
@@ -618,11 +441,11 @@ def _run_history(config) -> int:
         return 0
 
     except (
-        DatabaseError,
         MigrationRunnerError,
+        DatabaseError,
     ) as exc:
         print(
-            f"Error: {exc}",
+            f"Could not read migration history: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -631,8 +454,10 @@ def _run_history(config) -> int:
         database.close()
 
 
-def _run_current(config) -> int:
-    """Show the current migration version."""
+def _run_current(
+    config,
+) -> int:
+    """Display the current migration."""
     database = _create_database(
         config.database_url
     )
@@ -664,6 +489,7 @@ def _run_current(config) -> int:
         current = applied[-1]
 
         print(
+            f"Current migration: "
             f"{current.version:03d} "
             f"{current.name}"
         )
@@ -671,11 +497,12 @@ def _run_current(config) -> int:
         return 0
 
     except (
-        DatabaseError,
         MigrationRunnerError,
+        DatabaseError,
     ) as exc:
         print(
-            f"Error: {exc}",
+            f"Could not determine current migration: "
+            f"{exc}",
             file=sys.stderr,
         )
         return 1
@@ -684,8 +511,10 @@ def _run_current(config) -> int:
         database.close()
 
 
-def _run_status(config) -> int:
-    """Show migration status."""
+def _run_status(
+    config,
+) -> int:
+    """Display migration status."""
     database = _create_database(
         config.database_url
     )
@@ -712,12 +541,7 @@ def _run_status(config) -> int:
             migrations
         )
 
-        print(
-            "Migration status"
-        )
-        print(
-            "================"
-        )
+        print("Migration status")
         print(
             f"Total migrations: "
             f"{status.total_count}"
@@ -737,57 +561,46 @@ def _run_status(config) -> int:
 
         if status.current is None:
             print(
-                "Current: none"
+                "Current migration: none"
             )
         else:
             print(
-                "Current: "
+                f"Current migration: "
                 f"{status.current.version:03d} "
                 f"{status.current.name}"
             )
 
         if status.pending:
-            print(
-                "\nPending migrations:"
-            )
+            print("Pending migrations:")
 
             for migration in status.pending:
                 print(
-                    f"  {migration.version:03d} "
+                    f"{migration.version:03d} "
                     f"{migration.name}"
                 )
 
-        if status.missing:
+        if (
+            status.pending_count == 0
+            and status.missing_count == 0
+        ):
             print(
-                "\nMissing migration files:"
+                "Database is up to date."
             )
-
-            for record in status.missing:
-                print(
-                    f"  {record.version:03d} "
-                    f"{record.name}"
-                )
-
-        if status.is_up_to_date:
+        else:
             print(
-                "\nDatabase is up to date."
+                "Database requires migration changes."
             )
-            return 0
-
-        print(
-            "\nDatabase requires migration changes."
-        )
 
         return 0
 
     except (
-        DatabaseError,
         MigrationRunnerError,
         MigrationStatusError,
-        HistoryError,
+        DatabaseError,
     ) as exc:
         print(
-            f"Error: {exc}",
+            f"Could not determine migration status: "
+            f"{exc}",
             file=sys.stderr,
         )
         return 1
@@ -796,57 +609,194 @@ def _run_status(config) -> int:
         database.close()
 
 
-def _run_lint(config) -> int:
-    """Lint migration SQL for potentially dangerous operations."""
+def _run_doctor(
+    config,
+) -> int:
+    """Run database and migration health diagnostics."""
+    database = _create_database(
+        config.database_url
+    )
+
+    if database is None:
+        return 1
+
+    try:
+        database.connect()
+
+        migrations = _load_migrations(
+            config
+        )
+
+        report = DatabaseDoctor(
+            database
+        ).inspect(
+            migrations
+        )
+
+        for issue in report.issues:
+            print(
+                issue.format()
+            )
+
+        if report.healthy:
+            print(
+                "Doctor: database is healthy."
+            )
+            return 0
+
+        print(
+            "Doctor: database health checks "
+            "reported errors.",
+            file=sys.stderr,
+        )
+
+        return 1
+
+    except (
+        MigrationRunnerError,
+        DatabaseError,
+    ) as exc:
+        print(
+            f"Doctor failed: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    finally:
+        database.close()
+
+
+def _run_create(
+    config,
+    args,
+) -> int:
+    """Create a new migration file."""
+
+    from .migration_creator import (
+        MigrationCreationError,
+        create_migration,
+    )
+
+    try:
+        migration = create_migration(
+            config.migrations_path,
+            args.name,
+        )
+
+        print(
+            f"Created migration "
+            f"{migration.identifier}."
+        )
+
+        print(
+            f"File: {migration.path}"
+        )
+
+        return 0
+
+    except MigrationCreationError as exc:
+        print(
+            str(exc),
+            file=sys.stderr,
+        )
+        return 1
+
+
+def _run_plan(
+    config,
+) -> int:
+    """Display the migrations that would be applied."""
+    database = _create_database(
+        config.database_url
+    )
+
+    if database is None:
+        return 1
+
+    try:
+        database.connect()
+
+        migrations = _load_migrations(
+            config
+        )
+
+        from .planner import MigrationPlanner
+
+        planner = MigrationPlanner(
+            MigrationHistory(database)
+        )
+
+        plan = planner.plan(
+            migrations
+        )
+
+        print("Migration plan")
+
+        if plan.is_empty:
+            print(
+                "No pending migrations."
+            )
+            print(
+                "No changes were made "
+                "to the database."
+            )
+            return 0
+
+        print(
+            f"Pending migrations: "
+            f"{plan.count}"
+        )
+
+        for migration in plan.pending:
+            print(
+                f"{migration.version:03d} "
+                f"{migration.name}"
+            )
+
+        print(
+            "No changes were made "
+            "to the database."
+        )
+
+        return 0
+
+    except (
+        DatabaseError,
+        MigrationDiscoveryError,
+        MigrationParseError,
+    ) as exc:
+        print(
+            str(exc),
+            file=sys.stderr,
+        )
+        return 1
+
+    finally:
+        database.close()
+
+
+def _run_lint(
+    config,
+) -> int:
+    """Lint migration files for potentially dangerous SQL."""
     try:
         migrations = _load_migrations(
             config
         )
+
+        from .linter import lint_migrations
 
         report = lint_migrations(
             migrations
         )
 
         print("Migration lint")
-        print("===============")
 
-        if report.is_clean:
-            print("\nNo lint issues found.")
+        for issue in report.issues:
             print(
-                f"Checked {len(report.migrations)} "
-                "migration(s)."
+                issue.format()
             )
-            return 0
 
-        for migration in report.migrations:
-            migration_issues = [
-                issue
-                for issue in report.issues
-                if issue.migration == migration
-            ]
-
-            if not migration_issues:
-                continue
-
-            print()
-            print(migration.identifier)
-
-            for issue in migration_issues:
-                print(
-                    f"  {issue.severity} "
-                    f"[{issue.code}]"
-                )
-                print(
-                    f"  {issue.section}: "
-                    f"line {issue.line}"
-                )
-                print(
-                    f"  {issue.message}"
-                )
-
-        print()
-        print("Summary")
-        print("-------")
         print(
             f"Errors:   {report.error_count}"
         )
@@ -857,421 +807,185 @@ def _run_lint(config) -> int:
             f"Info:     {report.info_count}"
         )
 
-        return 1 if not report.is_valid else 0
-
-    except MigrationRunnerError as exc:
-        print(
-            f"Error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-def _run_explain(config) -> int:
-    """Explain recognized operations in migrations."""
-    try:
-        migrations = _load_migrations(
-            config
-        )
-
-        explanations = explain_migrations(
-            migrations
-        )
-
-        print("Migration explanation")
-        print("=====================")
-
-        for explanation in explanations:
-            print()
+        if report.is_clean:
             print(
-                explanation.migration.identifier
-            )
-
-            if explanation.is_empty:
-                print(
-                    "  No recognized SQL operations."
-                )
-                continue
-
-            for item in explanation.explanations:
-                print()
-                print(
-                    f"  {item.section.upper()}"
-                )
-                print(
-                    f"    {item.operation}"
-                )
-                print(
-                    f"      line: {item.line}"
-                )
-                print(
-                    f"      {item.description}"
-                )
-
-        if not explanations:
-            print(
-                "\nNo migrations found."
-            )
-
-        return 0
-
-    except MigrationRunnerError as exc:
-        print(
-            f"Error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-def _run_impact(config) -> int:
-    """Analyze the apparent impact of migrations."""
-    try:
-        migrations = _load_migrations(
-            config
-        )
-
-        impacts = analyze_migrations(
-            migrations
-        )
-
-        print("Migration impact")
-        print("================")
-
-        for impact in impacts:
-            print()
-            print(
-                impact.migration.identifier
-            )
-
-            print()
-            print("  Tables:")
-
-            if impact.tables:
-                for table in impact.tables:
-                    print(
-                        f"    {table}"
-                    )
-            else:
-                print(
-                    "    None detected"
-                )
-
-            print()
-            print("  Indexes:")
-
-            if impact.indexes:
-                for index in impact.indexes:
-                    print(
-                        f"    {index}"
-                    )
-            else:
-                print(
-                    "    None detected"
-                )
-
-            print()
-            print("  Operations:")
-
-            if impact.operations:
-                for operation in impact.operations:
-                    print(
-                        f"    {operation}"
-                    )
-            else:
-                print(
-                    "    None detected"
-                )
-
-            print()
-            print(
-                f"  Risk: {impact.risk}"
-            )
-
-        if not impacts:
-            print(
-                "\nNo migrations found."
-            )
-
-        return 0
-
-    except MigrationRunnerError as exc:
-        print(
-            f"Error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-def _run_schema(config) -> int:
-    """Inspect the current database schema."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
-        return 1
-
-    try:
-        database.connect()
-
-        schema = inspect_schema(
-            database
-        )
-
-        print("Database schema")
-        print("================")
-
-        if schema.is_empty:
-            print("\nNo user-defined schema objects found.")
-            return 0
-
-        if schema.tables:
-            print("\nTables:")
-
-            for table in schema.tables:
-                print(
-                    f"\n  {table.name}"
-                )
-
-                print("    Columns:")
-
-                for column in table.columns:
-                    nullable = (
-                        "NOT NULL"
-                        if column.not_null
-                        else "NULL"
-                    )
-
-                    primary_key = (
-                        " PRIMARY KEY"
-                        if column.primary_key_position
-                        else ""
-                    )
-
-                    print(
-                        f"      {column.name}: "
-                        f"{column.data_type or 'UNSPECIFIED'} "
-                        f"{nullable}"
-                        f"{primary_key}"
-                    )
-
-                if table.indexes:
-                    print("    Indexes:")
-
-                    for index in table.indexes:
-                        unique = (
-                            " UNIQUE"
-                            if index.unique
-                            else ""
-                        )
-
-                        columns = ", ".join(
-                            index.columns
-                        )
-
-                        print(
-                            f"      {index.name}"
-                            f"{unique}"
-                            f" ({columns})"
-                        )
-
-                if table.foreign_keys:
-                    print(
-                        "    Foreign keys:"
-                    )
-
-                    for foreign_key in (
-                        table.foreign_keys
-                    ):
-                        print(
-                            f"      "
-                            f"{foreign_key.column} -> "
-                            f"{foreign_key.referenced_table}"
-                            f"({foreign_key.referenced_column})"
-                            f" "
-                            f"ON DELETE "
-                            f"{foreign_key.on_delete}"
-                        )
-
-        if schema.views:
-            print("\nViews:")
-
-            for view in schema.views:
-                print(
-                    f"  {view.name}"
-                )
-
-        print(
-            f"\nTables: {schema.table_count}"
-        )
-
-        print(
-            f"Views: {schema.view_count}"
-        )
-
-        return 0
-
-    except (
-        DatabaseError,
-        SchemaInspectionError,
-    ) as exc:
-        print(
-            f"Error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    finally:
-        database.close()
-
-
-def _run_fingerprint(config) -> int:
-    """Show the current database schema fingerprint."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
-        return 1
-
-    try:
-        database.connect()
-
-        schema = inspect_schema(
-            database
-        )
-
-        print(
-            "Database schema fingerprint"
-        )
-        print(
-            "==========================="
-        )
-
-        print(
-            f"\n{schema.fingerprint()}"
-        )
-
-        return 0
-
-    except (
-        DatabaseError,
-        SchemaInspectionError,
-    ) as exc:
-        print(
-            f"Error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    finally:
-        database.close()
-
-
-def _run_schema_diff(config) -> int:
-    """Compare the current database schema with a reproduced schema."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
-        return 1
-
-    try:
-        database.connect()
-
-        migrations = _load_migrations(
-            config
-        )
-
-        target_schema = inspect_schema(
-            database
-        )
-
-        report = check_reproducibility(
-            migrations,
-            target_schema,
-        )
-
-        print("Schema diff")
-        print("===========")
-
-        print(
-            f"\nExpected fingerprint: "
-            f"{report.expected_fingerprint}"
-        )
-
-        print(
-            f"Actual fingerprint:   "
-            f"{report.actual_fingerprint}"
-        )
-
-        if report.is_reproducible:
-            print(
-                "\nSchemas are identical."
-            )
-            print(
-                "Migration set is reproducible."
+                "No migration issues found."
             )
             return 0
 
-        print("\nDifferences:")
-
-        for change in report.diff.changes:
-            print(
-                f"  {change.format()}"
-            )
-
-        print(
-            "\nSchema reproduction failed."
-        )
-
         return 1
 
     except (
-        DatabaseError,
-        MigrationRunnerError,
-        ReproducibilityError,
+        MigrationDiscoveryError,
+        MigrationParseError,
     ) as exc:
         print(
-            f"Error: {exc}",
+            str(exc),
             file=sys.stderr,
         )
         return 1
 
-    finally:
-        database.close()
-    
-def main(
-    argv: list[str] | None = None,
+
+def run_command(
+    args,
+    config,
 ) -> int:
-    """Run the dbmigrate CLI."""
-    try:
-        args = parse_args(
-            argv
-        )
-    except SystemExit as exc:
-        return int(exc.code)
-
-    if args.command is None:
-        build_parser().print_help()
-        return 0
-
+    """Run the selected command."""
     command = resolve_command(
         args.command
     )
 
     if command is None:
         print(
-            f"Unknown command: {args.command}",
+            "No command specified.",
             file=sys.stderr,
         )
-        return 2
+        return 1
 
-    return run_command(
-        command,
-        args,
+    command_name = command.name
+
+    if command_name == "init":
+        return _run_init(
+            config
+        )
+
+    if command_name == "create":
+        return _run_create(
+            config,
+            args,
+        )
+
+    if command_name == "up":
+        return _run_up(
+            config
+        )
+
+    if command_name == "down":
+        return _run_down(
+            config,
+            args.steps,
+        )
+
+    if command_name == "status":
+        return _run_status(
+            config
+        )
+
+    if command_name == "history":
+        return _run_history(
+            config
+        )
+
+    if command_name == "current":
+        return _run_current(
+            config
+        )
+
+    if command_name == "validate":
+        return _run_validate(
+            config
+        )
+
+    if command_name == "plan":
+        return _run_plan(
+            config
+        )
+
+    if command_name == "lint":
+        return _run_lint(
+            config
+        )
+
+    if command_name == "explain":
+        return _run_explain(
+            config,
+            args,
+        )
+
+    if command_name == "impact":
+        return _run_impact(
+            config,
+            args,
+        )
+
+    if command_name == "schema":
+        return _run_schema(
+            config
+        )
+
+    if command_name == "schema-diff":
+        return _run_schema_diff(
+            config
+        )
+
+    if command_name == "fingerprint":
+        return _run_fingerprint(
+            config
+        )
+
+    if command_name == "doctor":
+        return _run_doctor(
+            config
+        )
+
+    if command_name == "check":
+        return _run_check(
+            config
+        )
+
+    if command_name == "verify-schema":
+        return _run_verify_schema(
+            config
+        )
+
+    print(
+        f"Command '{command_name}' is not implemented.",
+        file=sys.stderr,
     )
+    return 1
 
 
-if __name__ == "__main__":
-    raise SystemExit(
-        main()
-    )
+def main(
+    argv: Sequence[str] | None = None,
+) -> int:
+    """Run the dbmigrate command-line interface."""
+    parser = build_parser()
+
+    try:
+        args = parser.parse_args(
+            argv
+        )
+    except SystemExit as exc:
+        return int(exc.code)
+
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    try:
+        config = load_config()
+    except ConfigurationError as exc:
+        print(
+            f"Configuration error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        return run_command(
+            args,
+            config,
+        )
+    except (
+        MigrationDiscoveryError,
+        MigrationParseError,
+        MigrationRunnerError,
+        HistoryError,
+        MigrationStatusError,
+        DatabaseError,
+    ) as exc:
+        print(
+            str(exc),
+            file=sys.stderr,
+        )
+        return 1

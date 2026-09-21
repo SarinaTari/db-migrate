@@ -30,12 +30,17 @@ class Database(ABC):
     @property
     @abstractmethod
     def dialect(self) -> DatabaseDialect:
-        """Return the SQL dialect."""
+        """Return the database SQL dialect."""
 
     @property
     @abstractmethod
     def capabilities(self) -> DatabaseCapabilities:
-        """Return supported database capabilities."""
+        """Return database capabilities."""
+
+    @property
+    @abstractmethod
+    def is_connected(self) -> bool:
+        """Return whether the database is connected."""
 
     @abstractmethod
     def connect(self) -> None:
@@ -78,10 +83,6 @@ class Database(ABC):
         """Roll back the current transaction."""
 
     @abstractmethod
-    def begin(self) -> None:
-        """Begin an explicit transaction."""
-
-    @abstractmethod
     def transaction(self) -> "Transaction":
         """Return a transaction context manager."""
 
@@ -110,7 +111,10 @@ class Transaction(ABC):
 class SQLiteTransaction(Transaction):
     """Context manager for SQLite transactions."""
 
-    def __init__(self, database: "SQLiteDatabase") -> None:
+    def __init__(
+        self,
+        database: "SQLiteDatabase",
+    ) -> None:
         self.database = database
 
     def __enter__(self) -> "SQLiteDatabase":
