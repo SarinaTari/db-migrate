@@ -1,10 +1,10 @@
-"""Migration models, parsing, validation, and discovery."""
+"""Migration file parsing and discovery."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 
 MIGRATION_FILENAME_PATTERN = re.compile(
@@ -24,7 +24,7 @@ DOWN_MARKER = "-- +down"
 
 
 class MigrationError(Exception):
-    """Base exception for migration-related errors."""
+    """Base exception for migration errors."""
 
 
 class MigrationParseError(MigrationError):
@@ -32,12 +32,12 @@ class MigrationParseError(MigrationError):
 
 
 class MigrationDiscoveryError(MigrationError):
-    """Raised when migrations cannot be discovered safely."""
+    """Raised when migrations cannot be discovered."""
 
 
 @dataclass(frozen=True)
 class Migration:
-    """A parsed database migration."""
+    """Represent one database migration."""
 
     version: int
     name: str
@@ -62,171 +62,202 @@ def _parse_filename(path: Path) -> tuple[int, str]:
 
     if match is None:
         raise MigrationParseError(
-            f"Invalid migration filename '{path.name}'. "
-            "Expected '<version>_<name>.sql'."
+            f"Invalid migration filename: {path.name}"
         )
 
     version = int(match.group("version"))
     name = match.group("name")
 
-    if version < 1:
+    if version <= 0:
         raise MigrationParseError(
             f"Migration version must be greater than zero: "
-            f"'{path.name}'."
+            f"{path.name}"
         )
 
     return version, name
 
 
 def _parse_metadata(
-    lines: list[str],
+    content: str,
     path: Path,
 ) -> tuple[int, str]:
-    """Parse and validate migration metadata."""
-    if len(lines) < 2:
+    """Parse migration metadata from file contents."""
+    migration_version: int | None = None
+    migration_name: str | None = None
+
+    for line in content.splitlines():
+        if migration_version is None:
+            version_match = MIGRATION_HEADER_PATTERN.match(line)
+
+            if version_match is not None:
+                migration_version = int(
+                    version_match.group("version")
+                )
+
+        if migration_name is None:
+            name_match = MIGRATION_NAME_PATTERN.match(line)
+
+            if name_match is not None:
+                migration_name = name_match.group("name")
+
+        if (
+            migration_version is not None
+            and migration_name is not None
+        ):
+            break
+
+    if migration_version is None:
         raise MigrationParseError(
-            f"Migration '{path.name}' is missing migration metadata."
+            f"migration metadata is missing a version: "
+            f"{path.name}"
         )
 
-    version_match = MIGRATION_HEADER_PATTERN.fullmatch(lines[0])
-
-    if version_match is None:
-        raise MigrationParseError(
-            f"Migration '{path.name}' is missing migration metadata. "
-            "It must start with '-- migration: <version>'."
-        )
-
-    name_match = MIGRATION_NAME_PATTERN.fullmatch(lines[1])
-
-    if name_match is None:
-        raise MigrationParseError(
-            f"Migration '{path.name}' is missing migration metadata. "
-            "It must contain '-- name: <name>' immediately after "
-            "the migration version."
-        )
-
-    version = int(version_match.group("version"))
-    name = name_match.group("name")
-
-    if version < 1:
+    if migration_version <= 0:
         raise MigrationParseError(
             f"Migration version must be greater than zero: "
-            f"'{path.name}'."
+            f"{path.name}"
         )
 
-    return version, name
+    if migration_name is None:
+        raise MigrationParseError(
+            f"migration metadata is missing a name: "
+            f"{path.name}"
+        )
+
+    return migration_version, migration_name
 
 
 def _extract_sections(
-    lines: list[str],
+    content: str,
     path: Path,
 ) -> tuple[str, str]:
     """Extract the up and down SQL sections."""
-    up_indices = [
-        index
-        for index, line in enumerate(lines)
-        if line.strip() == UP_MARKER
-    ]
+    lines = content.splitlines()
 
-    down_indices = [
-        index
-        for index, line in enumerate(lines)
-        if line.strip() == DOWN_MARKER
-    ]
+    up_index: int | None = None
+    down_index: int | None = None
 
-    if len(up_indices) != 1:
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+
+        if stripped == UP_MARKER:
+            if up_index is not None:
+                raise MigrationParseError(
+                    f"migration must contain exactly one "
+                    f"'{UP_MARKER}' marker: {path.name}"
+                )
+
+            up_index = index
+
+        elif stripped == DOWN_MARKER:
+            if down_index is not None:
+                raise MigrationParseError(
+                    f"migration must contain exactly one "
+                    f"'{DOWN_MARKER}' marker: {path.name}"
+                )
+
+            down_index = index
+
+    if up_index is None:
         raise MigrationParseError(
-            f"Migration '{path.name}' must contain exactly one "
-            f"'{UP_MARKER}' marker."
+            f"migration must contain exactly one "
+            f"'{UP_MARKER}' marker: {path.name}"
         )
 
-    if len(down_indices) != 1:
+    if down_index is None:
         raise MigrationParseError(
-            f"Migration '{path.name}' must contain exactly one "
-            f"'{DOWN_MARKER}' marker."
+            f"migration must contain exactly one "
+            f"'{DOWN_MARKER}' marker: {path.name}"
         )
 
-    up_index = up_indices[0]
-    down_index = down_indices[0]
-
-    if up_index >= down_index:
+    if down_index <= up_index:
         raise MigrationParseError(
-            f"Migration '{path.name}' must place "
-            f"'{UP_MARKER}' before '{DOWN_MARKER}'."
+            f"'{DOWN_MARKER}' marker appears before "
+            f"'{UP_MARKER}': {path.name}"
         )
 
     up_sql = "\n".join(
-        lines[up_index + 1 : down_index]
+        lines[up_index + 1:down_index]
     ).strip()
 
     down_sql = "\n".join(
-        lines[down_index + 1 :]
+        lines[down_index + 1:]
     ).strip()
 
     if not up_sql:
         raise MigrationParseError(
-            f"Migration '{path.name}' has an empty up section."
+            f"empty up section: {path.name}"
         )
 
     if not down_sql:
         raise MigrationParseError(
-            f"Migration '{path.name}' has an empty down section."
+            f"empty down section: {path.name}"
         )
 
     return up_sql, down_sql
 
 
 def parse_migration(path: Path) -> Migration:
-    """Parse a migration file into a Migration object."""
-    path = path.expanduser().resolve()
+    """Parse one migration file."""
+    path = Path(path).resolve()
+
+    if not path.exists():
+        raise MigrationParseError(
+            f"Migration file does not exist: {path}"
+        )
 
     if not path.is_file():
         raise MigrationParseError(
-            f"Migration file does not exist: '{path}'."
+            f"Migration path is not a file: {path}"
         )
 
-    if path.suffix != ".sql":
+    if path.suffix.lower() != ".sql":
         raise MigrationParseError(
-            f"Migration file must use the .sql extension: '{path.name}'."
+            f"Migration file must use the .sql extension: "
+            f"{path.name}"
         )
+
+    version_from_filename, name_from_filename = _parse_filename(
+        path
+    )
 
     try:
-        content = path.read_text(encoding="utf-8")
+        content = path.read_text(
+            encoding="utf-8"
+        )
     except OSError as exc:
         raise MigrationParseError(
-            f"Could not read migration '{path}': {exc}"
+            f"Could not read migration file "
+            f"{path.name}: {exc}"
         ) from exc
 
-    lines = content.splitlines()
-
-    filename_version, filename_name = _parse_filename(path)
-    metadata_version, metadata_name = _parse_metadata(
-        lines,
+    version_from_metadata, name_from_metadata = _parse_metadata(
+        content,
         path,
     )
 
-    if filename_version != metadata_version:
+    if version_from_filename != version_from_metadata:
         raise MigrationParseError(
-            f"Migration version mismatch in '{path.name}': "
-            f"filename has {filename_version}, "
-            f"metadata has {metadata_version}."
+            f"Migration version mismatch in {path.name}: "
+            f"filename declares {version_from_filename}, "
+            f"metadata declares {version_from_metadata}."
         )
 
-    if filename_name != metadata_name:
+    if name_from_filename != name_from_metadata:
         raise MigrationParseError(
-            f"Migration name mismatch in '{path.name}': "
-            f"filename has '{filename_name}', "
-            f"metadata has '{metadata_name}'."
+            f"Migration name mismatch in {path.name}: "
+            f"filename declares '{name_from_filename}', "
+            f"metadata declares '{name_from_metadata}'."
         )
 
     up_sql, down_sql = _extract_sections(
-        lines,
+        content,
         path,
     )
 
     return Migration(
-        version=metadata_version,
-        name=metadata_name,
+        version=version_from_filename,
+        name=name_from_filename,
         up_sql=up_sql,
         down_sql=down_sql,
         path=path,
@@ -236,43 +267,57 @@ def parse_migration(path: Path) -> Migration:
 def discover_migrations(
     directory: Path,
 ) -> tuple[Migration, ...]:
-    """Discover and parse all migration files in a directory."""
-    directory = directory.expanduser().resolve()
+    """Discover and parse all migration files."""
+    directory = Path(directory).resolve()
 
     if not directory.exists():
         raise MigrationDiscoveryError(
-            f"Migration directory does not exist: '{directory}'."
+            f"Migration directory does not exist: "
+            f"{directory}"
         )
 
     if not directory.is_dir():
         raise MigrationDiscoveryError(
-            f"Migration path is not a directory: '{directory}'."
+            f"Migration path is not a directory: "
+            f"{directory}"
         )
 
-    migration_files = sorted(
-        directory.glob("*.sql")
-    )
+    try:
+        migration_paths = sorted(
+            directory.glob("*.sql"),
+            key=lambda path: path.name,
+        )
+    except OSError as exc:
+        raise MigrationDiscoveryError(
+            f"Could not inspect migration directory "
+            f"{directory}: {exc}"
+        ) from exc
 
     migrations: list[Migration] = []
 
-    for path in migration_files:
-        migrations.append(
-            parse_migration(path)
-        )
+    for path in migration_paths:
+        try:
+            migrations.append(
+                parse_migration(path)
+            )
+        except MigrationParseError as exc:
+            raise MigrationDiscoveryError(
+                str(exc)
+            ) from exc
 
     migrations.sort(
         key=lambda migration: migration.version
     )
 
-    seen_versions: set[int] = set()
+    versions: set[int] = set()
 
     for migration in migrations:
-        if migration.version in seen_versions:
+        if migration.version in versions:
             raise MigrationDiscoveryError(
-                f"Duplicate migration version detected: "
+                f"Duplicate migration version "
                 f"{migration.version:03d}."
             )
 
-        seen_versions.add(migration.version)
+        versions.add(migration.version)
 
     return tuple(migrations)

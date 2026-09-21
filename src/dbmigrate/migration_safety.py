@@ -1,12 +1,12 @@
-"""Safety checks performed before migration execution."""
+"""Migration safety checks."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Sequence
 
-from .checksum import verify_migration_checksums
 from .database import Database, DatabaseError
+from .history import HistoryError, MigrationHistory, MigrationRecord
 from .migration import Migration
 
 
@@ -16,7 +16,7 @@ class MigrationSafetyError(Exception):
 
 @dataclass(frozen=True)
 class SafetyIssue:
-    """Describe a migration safety issue."""
+    """Describe one migration safety issue."""
 
     severity: str
     code: str
@@ -24,35 +24,33 @@ class SafetyIssue:
 
     @property
     def is_error(self) -> bool:
-        """Return whether this issue blocks execution."""
+        """Return whether the issue is an error."""
         return self.severity == "ERROR"
 
+    @property
+    def is_warning(self) -> bool:
+        """Return whether the issue is a warning."""
+        return self.severity == "WARNING"
+
     def format(self) -> str:
-        """Return a human-readable representation."""
-        return (
-            f"[{self.severity}] "
-            f"{self.code}: "
-            f"{self.message}"
-        )
+        """Return a human-readable issue description."""
+        return f"{self.severity} [{self.code}]: {self.message}"
 
 
 @dataclass(frozen=True)
 class SafetyReport:
-    """Result of migration safety checks."""
+    """Describe the result of migration safety checks."""
 
     issues: tuple[SafetyIssue, ...]
 
     @property
     def is_safe(self) -> bool:
-        """Return whether migration execution is safe."""
-        return not any(
-            issue.is_error
-            for issue in self.issues
-        )
+        """Return whether no safety errors were found."""
+        return not self.errors
 
     @property
     def errors(self) -> tuple[SafetyIssue, ...]:
-        """Return blocking issues."""
+        """Return safety errors."""
         return tuple(
             issue
             for issue in self.issues
@@ -61,22 +59,31 @@ class SafetyReport:
 
     @property
     def warnings(self) -> tuple[SafetyIssue, ...]:
-        """Return warning issues."""
+        """Return safety warnings."""
         return tuple(
             issue
             for issue in self.issues
-            if issue.severity == "WARNING"
+            if issue.is_warning
+        )
+
+    def format(self) -> str:
+        """Return all safety issues as formatted text."""
+        if not self.issues:
+            return "Migration safety checks passed."
+
+        return "\n".join(
+            issue.format()
+            for issue in self.issues
         )
 
 
 class MigrationSafetyChecker:
-    """Perform pre-execution migration safety checks."""
+    """Check migrations for database and execution safety."""
 
-    def __init__(
-        self,
-        database: Database,
-    ) -> None:
+    def __init__(self, database: Database) -> None:
+        """Initialize the safety checker."""
         self.database = database
+        self.history = MigrationHistory(database)
 
     def check(
         self,
@@ -85,77 +92,65 @@ class MigrationSafetyChecker:
         """Run all migration safety checks."""
         issues: list[SafetyIssue] = []
 
-        self._check_database_connection(
-            issues
+        issues.extend(
+            self._check_database_connection()
         )
-        self._check_migration_order(
-            migrations,
-            issues,
+        issues.extend(
+            self._check_migration_order(migrations)
         )
-        self._check_duplicates(
-            migrations,
-            issues,
+        issues.extend(
+            self._check_duplicates(migrations)
         )
-        self._check_capabilities(
-            migrations,
-            issues,
+        issues.extend(
+            self._check_capabilities()
         )
-        self._check_applied_migrations(
-            migrations,
-            issues,
+        issues.extend(
+            self._check_applied_migrations(migrations)
         )
 
         return SafetyReport(
             issues=tuple(issues)
         )
 
-    def require_safe(
-        self,
-        migrations: Sequence[Migration],
-    ) -> SafetyReport:
+    def require_safe(self, migrations) -> SafetyReport:
         """Run safety checks and raise if unsafe."""
-        report = self.check(
-            migrations
-        )
+        report = self.check(migrations)
 
         if not report.is_safe:
-            messages = "\n".join(
-                issue.format()
-                for issue in report.errors
-            )
-
             raise MigrationSafetyError(
-                "Migration safety checks failed:\n"
-                f"{messages}"
+                f"Migration safety checks failed:\n"
+                f"{report.format()}"
             )
 
         return report
 
     def _check_database_connection(
         self,
-        issues: list[SafetyIssue],
-    ) -> None:
+    ) -> list[SafetyIssue]:
+        """Check database connectivity."""
         try:
-            self.database.fetch_one(
-                self.database.dialect.version_query()
-            )
+            self.database.version()
         except DatabaseError as exc:
-            issues.append(
+            return [
                 SafetyIssue(
                     severity="ERROR",
-                    code="DATABASE_UNAVAILABLE",
+                    code="DATABASE_CONNECTION",
                     message=(
-                        "Database connection check failed: "
+                        "Could not connect to the database: "
                         f"{exc}"
                     ),
                 )
-            )
+            ]
+
+        return []
 
     def _check_migration_order(
         self,
         migrations: Sequence[Migration],
-        issues: list[SafetyIssue],
-    ) -> None:
+    ) -> list[SafetyIssue]:
+        """Check that migration versions are valid and ordered."""
+        issues: list[SafetyIssue] = []
+
         versions = [
             migration.version
             for migration in migrations
@@ -173,155 +168,189 @@ class MigrationSafetyChecker:
                 )
             )
 
+        invalid_versions = [
+            version
+            for version in versions
+            if version <= 0
+        ]
+
+        if invalid_versions:
+            issues.append(
+                SafetyIssue(
+                    severity="ERROR",
+                    code="INVALID_VERSION",
+                    message=(
+                        "Migration versions must be "
+                        "greater than zero."
+                    ),
+                )
+            )
+
+        return issues
+
     def _check_duplicates(
         self,
         migrations: Sequence[Migration],
-        issues: list[SafetyIssue],
-    ) -> None:
-        versions = [
-            migration.version
-            for migration in migrations
-        ]
+    ) -> list[SafetyIssue]:
+        """Check for duplicate migration versions and identifiers."""
+        issues: list[SafetyIssue] = []
 
-        duplicate_versions = {
-            version
-            for version in versions
-            if versions.count(version) > 1
-        }
+        version_counts: dict[int, int] = {}
 
-        for version in sorted(duplicate_versions):
-            issues.append(
-                SafetyIssue(
-                    severity="ERROR",
-                    code="DUPLICATE_VERSION",
-                    message=(
-                        f"Migration version {version} "
-                        "appears more than once."
-                    ),
-                )
+        for migration in migrations:
+            version_counts[migration.version] = (
+                version_counts.get(migration.version, 0) + 1
             )
 
-        identifiers = [
-            migration.name
-            for migration in migrations
-        ]
-
-        duplicate_identifiers = {
-            identifier
-            for identifier in identifiers
-            if identifiers.count(identifier) > 1
-        }
-
-        for identifier in sorted(
-            duplicate_identifiers
-        ):
-            issues.append(
-                SafetyIssue(
-                    severity="ERROR",
-                    code="DUPLICATE_IDENTIFIER",
-                    message=(
-                        f"Migration identifier "
-                        f"'{identifier}' appears more "
-                        "than once."
-                    ),
+        for version, count in sorted(version_counts.items()):
+            if count > 1:
+                issues.append(
+                    SafetyIssue(
+                        severity="ERROR",
+                        code="DUPLICATE_VERSION",
+                        message=(
+                            f"Migration version "
+                            f"{version:03d} appears more than once."
+                        ),
+                    )
                 )
+
+        identifier_counts: dict[str, int] = {}
+
+        for migration in migrations:
+            identifier = migration.name
+            identifier_counts[identifier] = (
+                identifier_counts.get(identifier, 0) + 1
             )
+
+        for identifier, count in sorted(identifier_counts.items()):
+            if count > 1:
+                issues.append(
+                    SafetyIssue(
+                        severity="ERROR",
+                        code="DUPLICATE_IDENTIFIER",
+                        message=(
+                            f"Migration identifier "
+                            f"'{identifier}' appears more than once."
+                        ),
+                    )
+                )
+
+        return issues
 
     def _check_capabilities(
         self,
-        migrations: Sequence[Migration],
-        issues: list[SafetyIssue],
-    ) -> None:
-        if not migrations:
-            return
+    ) -> list[SafetyIssue]:
+        """Check database capabilities relevant to migrations."""
+        issues: list[SafetyIssue] = []
 
-        if not self.database.capabilities.supports(
-            "transactional_ddl"
-        ):
+        capabilities = self.database.capabilities
+
+        if not capabilities.transactional_ddl:
             issues.append(
                 SafetyIssue(
                     severity="WARNING",
                     code="NON_TRANSACTIONAL_DDL",
                     message=(
-                        f"{self.database.engine} does not "
-                        "provide transactional DDL. A "
-                        "partially applied migration may "
-                        "not be automatically reversible."
+                        f"Database engine "
+                        f"'{self.database.engine}' does not "
+                        "provide transactional DDL. A migration "
+                        "failure may leave partial schema changes."
                     ),
                 )
             )
+
+        if not capabilities.advisory_locks:
+            issues.append(
+                SafetyIssue(
+                    severity="WARNING",
+                    code="NO_ADVISORY_LOCKS",
+                    message=(
+                        f"Database engine "
+                        f"'{self.database.engine}' does not "
+                        "provide advisory locks."
+                    ),
+                )
+            )
+
+        return issues
 
     def _check_applied_migrations(
         self,
         migrations: Sequence[Migration],
-        issues: list[SafetyIssue],
-    ) -> None:
+    ) -> list[SafetyIssue]:
+        """Check applied migration history against migration files."""
+        issues: list[SafetyIssue] = []
+
         try:
-            from .history import MigrationHistory
-
-            history = MigrationHistory(
-                self.database
-            )
-            history.initialize()
-
-            records = history.list_applied()
-
-            recorded_versions = {
-                record.version
-                for record in records
-            }
-
-            migration_versions = {
-                migration.version
-                for migration in migrations
-            }
-
-            missing_versions = sorted(
-                recorded_versions - migration_versions
-            )
-
-            for version in missing_versions:
-                record = next(
-                    record
-                    for record in records
-                    if record.version == version
+            self.history.initialize()
+            records = self.history.list_applied()
+        except HistoryError as exc:
+            return [
+                SafetyIssue(
+                    severity="ERROR",
+                    code="HISTORY_ACCESS",
+                    message=(
+                        "Could not inspect migration history: "
+                        f"{exc}"
+                    ),
                 )
+            ]
 
-                issues.append(
-                    SafetyIssue(
-                        severity="ERROR",
-                        code="MISSING_MIGRATION",
-                        message=(
-                            f"Migration {record.version:03d} "
-                            f"'{record.name}' is recorded in "
-                            "the database but its migration "
-                            "file is missing."
-                        ),
-                    )
-                )
+        migration_versions = {
+            migration.version
+            for migration in migrations
+        }
 
-            mismatches = verify_migration_checksums(
-                migrations,
-                records,
-            )
+        missing_migrations = [
+            record
+            for record in records
+            if record.version not in migration_versions
+        ]
 
-            for mismatch in mismatches:
-                issues.append(
-                    SafetyIssue(
-                        severity="ERROR",
-                        code="CHECKSUM_MISMATCH",
-                        message=mismatch.format(),
-                    )
-                )
-
-        except DatabaseError as exc:
+        for record in missing_migrations:
             issues.append(
                 SafetyIssue(
                     severity="ERROR",
-                    code="HISTORY_CHECK_FAILED",
+                    code="MISSING_MIGRATION_FILE",
                     message=(
-                        "Could not verify migration "
-                        f"history: {exc}"
+                        f"Migration {record.version:03d} "
+                        f"({record.name}) is recorded as applied "
+                        "but its migration file is missing."
                     ),
                 )
             )
+
+        try:
+            from .checksum import verify_migration_checksums
+
+            checksum_mismatches = verify_migration_checksums(
+                migrations,
+                records,
+            )
+        except Exception as exc:
+            issues.append(
+                SafetyIssue(
+                    severity="ERROR",
+                    code="CHECKSUM_VERIFICATION",
+                    message=(
+                        "Could not verify migration checksums: "
+                        f"{exc}"
+                    ),
+                )
+            )
+            return issues
+
+        for mismatch in checksum_mismatches:
+            issues.append(
+                SafetyIssue(
+                    severity="ERROR",
+                    code="CHECKSUM_MISMATCH",
+                    message=(
+                        f"Migration {mismatch.migration.identifier} "
+                        "has been modified after it was applied."
+                    ),
+                )
+            )
+
+        return issues

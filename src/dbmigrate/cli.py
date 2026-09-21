@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
-from typing import Sequence
 
 from . import __version__
 from .commands.base import (
+    Command,
     get_commands,
     resolve_command,
 )
@@ -16,25 +15,31 @@ from .config import (
     ConfigurationError,
     load_config,
 )
-from .database import DatabaseError
-from .database_factory import create_database
-from .database_lock import (
-    MigrationLockError,
-    create_migration_lock,
+from .database_factory import (
+    create_database,
 )
-from .doctor import DatabaseDoctor
 from .history import (
     HistoryError,
     MigrationHistory,
+)
+from .linter import (
+    lint_migrations,
+)
+from .logging_config import (
+    configure_logging,
 )
 from .migration import (
     MigrationDiscoveryError,
     MigrationParseError,
     discover_migrations,
 )
-from .migration_safety import (
-    MigrationSafetyChecker,
-    MigrationSafetyError,
+from .migration_creator import (
+    MigrationCreationError,
+    create_migration,
+)
+from .planner import (
+    MigrationPlanner,
+    MigrationPlanningError,
 )
 from .runner import (
     MigrationRunner,
@@ -44,22 +49,46 @@ from .status import (
     MigrationStatusError,
     MigrationStatusInspector,
 )
-from .validation import validate_migrations
+from .validation import (
+    validate_migrations,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the dbmigrate argument parser."""
     parser = argparse.ArgumentParser(
         prog="dbmigrate",
-        description=(
-            "Database migration and schema-evolution tool."
-        ),
+        description="Database migration and schema-evolution tool.",
     )
 
     parser.add_argument(
         "--version",
         action="version",
         version=__version__,
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose diagnostic logging.",
+    )
+
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress non-error diagnostic logging.",
+    )
+
+    parser.add_argument(
+        "--log-level",
+        choices=(
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR",
+            "CRITICAL",
+        ),
+        help="Set the diagnostic logging level.",
     )
 
     subparsers = parser.add_subparsers(
@@ -78,10 +107,10 @@ def build_parser() -> argparse.ArgumentParser:
         if command.name == "create":
             command_parser.add_argument(
                 "name",
-                help="Migration name.",
+                help="Name of the new migration.",
             )
 
-        if command.name == "down":
+        elif command.name == "down":
             command_parser.add_argument(
                 "--steps",
                 type=int,
@@ -92,109 +121,189 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _create_database(
-    database_url: str,
-):
-    """Create a database implementation."""
-    try:
-        return create_database(
-            database_url
-        )
+def parse_args(
+    argv: list[str] | None = None,
+) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    return build_parser().parse_args(argv)
 
-    except DatabaseError as exc:
+
+def _configure_logging(
+    args: argparse.Namespace,
+) -> None:
+    """Configure CLI logging."""
+    if args.quiet:
+        options = "ERROR"
+    elif args.verbose:
+        options = "DEBUG"
+    elif args.log_level is not None:
+        options = args.log_level
+    else:
+        options = "WARNING"
+
+    configure_logging(options)
+
+
+def run_command(
+    command: Command,
+    args: argparse.Namespace,
+) -> int:
+    """Dispatch a resolved command."""
+    _configure_logging(args)
+
+    if command.name == "init":
+        return _run_init()
+
+    try:
+        config = load_config()
+    except ConfigurationError as exc:
         print(
             f"Configuration error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if command.name == "create":
+        return _run_create(config, args.name)
+
+    if command.name == "validate":
+        return _run_validate(config)
+
+    if command.name == "check":
+        return _run_check(config)
+
+    if command.name == "up":
+        return _run_up(config)
+
+    if command.name == "down":
+        return _run_down(config, args.steps)
+
+    if command.name == "history":
+        return _run_history(config)
+
+    if command.name == "current":
+        return _run_current(config)
+
+    if command.name == "status":
+        return _run_status(config)
+
+    if command.name == "plan":
+        return _run_plan(config)
+
+    if command.name == "lint":
+        return _run_lint(config)
+
+    print(
+        f"Command '{command.name}' is not implemented yet. "
+        "This command will be introduced in a later phase."
+    )
+
+    return 0
+
+
+def _run_init() -> int:
+    """Run the init command."""
+    print(
+        "Command 'init' is not implemented yet. "
+        "Project initialization will be introduced in a later phase."
+    )
+
+    return 0
+
+
+def _run_create(
+    config,
+    name: str,
+) -> int:
+    """Create a new migration."""
+    try:
+        result = create_migration(
+            config.migrations_path,
+            name,
+        )
+    except MigrationCreationError as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"Created migration {result.identifier}."
+    )
+    print(
+        f"File: {result.path}"
+    )
+
+    return 0
+
+
+def _run_validate(config) -> int:
+    """Run migration validation."""
+    try:
+        report = validate_migrations(
+            config.migrations_path
+        )
+    except OSError as exc:
+        print(
+            "Validation error: could not access "
+            f"migrations directory: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"Migration directory: "
+        f"{config.migrations_path}"
+    )
+
+    print(
+        f"Migrations discovered: "
+        f"{len(report.migrations)}"
+    )
+
+    for migration in report.migrations:
+        print(
+            f"  {migration.version:03d} "
+            f"{migration.name}"
+        )
+
+    if report.errors:
+        print("\nValidation failed:")
+
+        for error in report.errors:
+            print(f"  - {error}")
+
+        return 1
+
+    print("\nMigration validation passed.")
+
+    return 0
+
+
+def _create_database(database_url: str):
+    """Create a database implementation from a database URL."""
+    try:
+        return create_database(database_url)
+    except Exception as exc:
+        print(
+            f"Database check failed: {exc}",
             file=sys.stderr,
         )
         return None
 
 
-def _load_migrations(
-    config,
-):
-    """Discover and parse migration files."""
-    try:
-        return discover_migrations(
-            config.migrations_path
-        )
-
-    except (
-        MigrationDiscoveryError,
-        MigrationParseError,
-    ) as exc:
-        raise MigrationRunnerError(
-            f"Could not load migrations: {exc}"
-        ) from exc
-
-
-def _run_init(
-    config,
-) -> int:
-    """Initialize a migration project."""
-    print(
-        "The project is already initialized."
-    )
-    return 0
-
-
-def _run_validate(
-    config,
-) -> int:
-    """Validate migration files."""
-    try:
-        migrations = _load_migrations(
-            config
-        )
-
-        errors = validate_migrations(
-            migrations
-        )
-
-        print(
-            f"Migration directory: "
-            f"{config.migrations_path}"
-        )
-
-        print(
-            f"Discovered migrations: "
-            f"{len(migrations)}"
-        )
-
-        if errors:
-            print(
-                "Migration validation failed:",
-                file=sys.stderr,
-            )
-
-            for error in errors:
-                print(
-                    f"- {error}",
-                    file=sys.stderr,
-                )
-
-            return 1
-
-        print(
-            "Migration validation: OK"
-        )
-
-        return 0
-
-    except MigrationRunnerError as exc:
-        print(
-            f"Migration validation failed: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-
 def _run_check(config) -> int:
     """Check database connectivity."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
+    try:
+        database = create_database(
+            config.database_url
+        )
+    except Exception as exc:
+        print(
+            f"Database check failed: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     try:
@@ -202,47 +311,25 @@ def _run_check(config) -> int:
 
         version = database.version()
 
-        engine_names = {
-            "sqlite": "SQLite",
-            "postgresql": "PostgreSQL",
-            "mysql": "MySQL",
-        }
-
-        engine_name = engine_names.get(
-            database.engine,
-            database.engine,
-        )
-
         print("Database connection: OK")
+        engine_name = database.engine
+
+        if engine_name.lower() == "sqlite":
+            engine_name = "SQLite"
+        elif engine_name.lower() in {"postgres", "postgresql"}:
+            engine_name = "PostgreSQL"
+        elif engine_name.lower() == "mysql":
+            engine_name = "MySQL"
+
         print(
-            f"Database engine: {engine_name}"
+            f"Database engine: "
+            f"{engine_name}"
         )
-
-        if database.engine == "sqlite":
-            print(
-                f"SQLite version: {version}"
-            )
-        elif database.engine == "postgresql":
-            print(
-                f"PostgreSQL version: {version}"
-            )
-        elif database.engine == "mysql":
-            print(
-                f"MySQL version: {version}"
-            )
-        else:
-            print(
-                f"Database version: {version}"
-            )
-
-        if hasattr(database, "path"):
-            print(
-                f"Database path: {database.path}"
-            )
+        print(f"SQLite version: {database.version()}")
 
         return 0
 
-    except DatabaseError as exc:
+    except Exception as exc:
         print(
             f"Database check failed: {exc}",
             file=sys.stderr,
@@ -253,66 +340,62 @@ def _run_check(config) -> int:
         database.close()
 
 
-def _run_up(
-    config,
-) -> int:
-    """Apply pending migrations."""
-    database = _create_database(
-        config.database_url
-    )
+def _load_migrations(config):
+    """Load migration files."""
+    try:
+        return discover_migrations(
+            config.migrations_path
+        )
+    except (
+        MigrationDiscoveryError,
+        MigrationParseError,
+    ) as exc:
+        raise MigrationRunnerError(
+            f"Could not load migrations: {exc}"
+        ) from exc
 
-    if database is None:
+
+def _run_up(config) -> int:
+    """Apply all pending migrations."""
+    try:
+        database = create_database(
+            config.database_url
+        )
+    except Exception as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         database.connect()
 
-        migrations = _load_migrations(
-            config
-        )
+        migrations = _load_migrations(config)
 
-        safety_checker = MigrationSafetyChecker(
-            database
-        )
+        runner = MigrationRunner(database)
 
-        safety_checker.require_safe(
+        applied = runner.apply_all(
             migrations
         )
 
-        lock = create_migration_lock(
-            database
-        )
-
-        with lock:
-            runner = MigrationRunner(
-                database
-            )
-
-            applied = runner.apply_all(
-                migrations
-            )
-
         if not applied:
-            print(
-                "No pending migrations."
-            )
+            print("No pending migrations.")
             return 0
 
-        for migration in applied:
+        for result in applied:
             print(
-                f"Applied {migration.identifier}."
+                f"Applied "
+                f"{result.migration.identifier}."
             )
 
         return 0
 
     except (
-        MigrationRunnerError,
-        MigrationSafetyError,
-        MigrationLockError,
-        DatabaseError,
+        Exception,
     ) as exc:
         print(
-            f"Migration failed: {exc}",
+            f"Error: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -325,73 +408,52 @@ def _run_down(
     config,
     steps: int,
 ) -> int:
-    """Roll back migrations."""
-    if steps <= 0:
+    """Roll back applied migrations."""
+    if steps < 1:
         print(
-            "The number of rollback steps must be "
-            "greater than zero.",
+            "Error: --steps must be greater than zero.",
             file=sys.stderr,
         )
         return 1
 
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
+    try:
+        database = create_database(
+            config.database_url
+        )
+    except Exception as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         database.connect()
 
-        migrations = _load_migrations(
-            config
+        migrations = _load_migrations(config)
+
+        runner = MigrationRunner(database)
+
+        results = runner.rollback_steps(
+            migrations,
+            steps,
         )
 
-        safety_checker = MigrationSafetyChecker(
-            database
-        )
-
-        safety_checker.require_safe(
-            migrations
-        )
-
-        lock = create_migration_lock(
-            database
-        )
-
-        with lock:
-            runner = MigrationRunner(
-                database
-            )
-
-            rolled_back = runner.rollback_steps(
-                migrations,
-                steps,
-            )
-
-        if not rolled_back:
-            print(
-                "No applied migrations."
-            )
+        if not results:
+            print("No applied migrations.")
             return 0
 
-        for migration in rolled_back:
+        for result in results:
             print(
                 f"Rolled back "
-                f"{migration.identifier}."
+                f"{result.migration.identifier}."
             )
 
         return 0
 
-    except (
-        MigrationRunnerError,
-        MigrationSafetyError,
-        MigrationLockError,
-        DatabaseError,
-    ) as exc:
+    except Exception as exc:
         print(
-            f"Rollback failed: {exc}",
+            f"Error: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -400,27 +462,25 @@ def _run_down(
         database.close()
 
 
-def _run_history(
-    config,
-) -> int:
-    """Display migration history."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
+def _run_history(config) -> int:
+    """Show migration history."""
+    try:
+        database = create_database(
+            config.database_url
+        )
+    except Exception as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         database.connect()
 
-        migrations = _load_migrations(
-            config
-        )
+        migrations = _load_migrations(config)
 
-        runner = MigrationRunner(
-            database
-        )
+        runner = MigrationRunner(database)
 
         applied = runner.applied(
             migrations
@@ -440,12 +500,9 @@ def _run_history(
 
         return 0
 
-    except (
-        MigrationRunnerError,
-        DatabaseError,
-    ) as exc:
+    except Exception as exc:
         print(
-            f"Could not read migration history: {exc}",
+            f"Error: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -454,27 +511,25 @@ def _run_history(
         database.close()
 
 
-def _run_current(
-    config,
-) -> int:
-    """Display the current migration."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
+def _run_current(config) -> int:
+    """Show the current migration version."""
+    try:
+        database = create_database(
+            config.database_url
+        )
+    except Exception as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         database.connect()
 
-        migrations = _load_migrations(
-            config
-        )
+        migrations = _load_migrations(config)
 
-        runner = MigrationRunner(
-            database
-        )
+        runner = MigrationRunner(database)
 
         applied = runner.applied(
             migrations
@@ -489,20 +544,15 @@ def _run_current(
         current = applied[-1]
 
         print(
-            f"Current migration: "
             f"{current.version:03d} "
             f"{current.name}"
         )
 
         return 0
 
-    except (
-        MigrationRunnerError,
-        DatabaseError,
-    ) as exc:
+    except Exception as exc:
         print(
-            f"Could not determine current migration: "
-            f"{exc}",
+            f"Error: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -511,27 +561,25 @@ def _run_current(
         database.close()
 
 
-def _run_status(
-    config,
-) -> int:
-    """Display migration status."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
+def _run_status(config) -> int:
+    """Show migration status."""
+    try:
+        database = create_database(
+            config.database_url
+        )
+    except Exception as exc:
+        print(
+            f"Error: {exc}",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         database.connect()
 
-        migrations = _load_migrations(
-            config
-        )
+        migrations = _load_migrations(config)
 
-        runner = MigrationRunner(
-            database
-        )
+        runner = MigrationRunner(database)
 
         inspector = MigrationStatusInspector(
             runner
@@ -542,122 +590,72 @@ def _run_status(
         )
 
         print("Migration status")
+        print("================")
+
         print(
             f"Total migrations: "
             f"{status.total_count}"
         )
+
         print(
             f"Applied: "
             f"{status.applied_count}"
         )
+
         print(
             f"Pending: "
             f"{status.pending_count}"
         )
+
         print(
             f"Missing: "
             f"{status.missing_count}"
         )
 
         if status.current is None:
-            print(
-                "Current migration: none"
-            )
+            print("Current: none")
         else:
             print(
-                f"Current migration: "
+                "Current: "
                 f"{status.current.version:03d} "
                 f"{status.current.name}"
             )
 
         if status.pending:
-            print("Pending migrations:")
+            print("\nPending migrations:")
 
             for migration in status.pending:
                 print(
-                    f"{migration.version:03d} "
+                    f"  {migration.version:03d} "
                     f"{migration.name}"
                 )
 
-        if (
-            status.pending_count == 0
-            and status.missing_count == 0
-        ):
+        if status.missing:
             print(
-                "Database is up to date."
-            )
-        else:
-            print(
-                "Database requires migration changes."
+                "\nMissing migration files:"
             )
 
-        return 0
+            for record in status.missing:
+                print(
+                    f"  {record.version:03d} "
+                    f"{record.name}"
+                )
 
-    except (
-        MigrationRunnerError,
-        MigrationStatusError,
-        DatabaseError,
-    ) as exc:
-        print(
-            f"Could not determine migration status: "
-            f"{exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    finally:
-        database.close()
-
-
-def _run_doctor(
-    config,
-) -> int:
-    """Run database and migration health diagnostics."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
-        return 1
-
-    try:
-        database.connect()
-
-        migrations = _load_migrations(
-            config
-        )
-
-        report = DatabaseDoctor(
-            database
-        ).inspect(
-            migrations
-        )
-
-        for issue in report.issues:
+        if status.is_up_to_date:
             print(
-                issue.format()
-            )
-
-        if report.healthy:
-            print(
-                "Doctor: database is healthy."
+                "\nDatabase is up to date."
             )
             return 0
 
         print(
-            "Doctor: database health checks "
-            "reported errors.",
-            file=sys.stderr,
+            "\nDatabase requires migration changes."
         )
 
-        return 1
+        return 0
 
-    except (
-        MigrationRunnerError,
-        DatabaseError,
-    ) as exc:
+    except Exception as exc:
         print(
-            f"Doctor failed: {exc}",
+            f"Error: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -666,82 +664,22 @@ def _run_doctor(
         database.close()
 
 
-def _run_create(
-    config,
-    args,
-) -> int:
-    """Create a new migration file."""
-
-    from .migration_creator import (
-        MigrationCreationError,
-        create_migration,
-    )
-
+def _run_plan(config) -> int:
+    """Show pending migrations without executing them."""
     try:
-        migration = create_migration(
-            config.migrations_path,
-            args.name,
+        database = create_database(
+            config.database_url
         )
-
-        print(
-            f"Created migration "
-            f"{migration.identifier}."
-        )
-
-        print(
-            f"File: {migration.path}"
-        )
-
-        return 0
-
-    except MigrationCreationError as exc:
-        print(
-            str(exc),
-            file=sys.stderr,
-        )
-        return 1
-
-
-def _run_plan(
-    config,
-) -> int:
-    """Display the migrations that would be applied."""
-    database = _create_database(
-        config.database_url
-    )
-
-    if database is None:
-        return 1
-
-    try:
         database.connect()
 
-        migrations = _load_migrations(
-            config
-        )
+        migrations = _load_migrations(config)
+        history = MigrationHistory(database)
+        planner = MigrationPlanner(history)
 
-        from .planner import MigrationPlanner
-
-        planner = MigrationPlanner(
-            MigrationHistory(database)
-        )
-
-        plan = planner.plan(
-            migrations
-        )
+        plan = planner.plan(migrations)
 
         print("Migration plan")
-
-        if plan.is_empty:
-            print(
-                "No pending migrations."
-            )
-            print(
-                "No changes were made "
-                "to the database."
-            )
-            return 0
-
+        print("==============")
         print(
             f"Pending migrations: "
             f"{plan.count}"
@@ -749,243 +687,110 @@ def _run_plan(
 
         for migration in plan.pending:
             print(
-                f"{migration.version:03d} "
+                f"  {migration.version:03d} "
                 f"{migration.name}"
             )
 
         print(
-            "No changes were made "
-            "to the database."
+            "\nNo changes were made to the database."
         )
 
         return 0
 
     except (
-        DatabaseError,
-        MigrationDiscoveryError,
-        MigrationParseError,
+        Exception,
     ) as exc:
         print(
-            str(exc),
+            f"Error: {exc}",
             file=sys.stderr,
         )
         return 1
 
     finally:
-        database.close()
+        if "database" in locals():
+            database.close()
 
 
-def _run_lint(
-    config,
-) -> int:
-    """Lint migration files for potentially dangerous SQL."""
+def _run_lint(config) -> int:
+    """Lint migration files."""
     try:
-        migrations = _load_migrations(
-            config
-        )
-
-        from .linter import lint_migrations
-
+        migrations = _load_migrations(config)
         report = lint_migrations(
             migrations
         )
-
-        print("Migration lint")
-
-        for issue in report.issues:
-            print(
-                issue.format()
-            )
-
+    except Exception as exc:
         print(
-            f"Errors:   {report.error_count}"
-        )
-        print(
-            f"Warnings: {report.warning_count}"
-        )
-        print(
-            f"Info:     {report.info_count}"
-        )
-
-        if report.is_clean:
-            print(
-                "No migration issues found."
-            )
-            return 0
-
-        return 1
-
-    except (
-        MigrationDiscoveryError,
-        MigrationParseError,
-    ) as exc:
-        print(
-            str(exc),
+            f"Lint error: {exc}",
             file=sys.stderr,
         )
         return 1
 
+    print("Migration lint")
+    print("==============")
 
-def run_command(
-    args,
-    config,
+    print(
+        f"Migrations checked: "
+        f"{len(report.migrations)}"
+    )
+
+    print(
+        f"Errors:   {report.error_count}"
+    )
+
+    print(
+        f"Warnings: {report.warning_count}"
+    )
+
+    print(
+        f"Info:     {report.info_count}"
+    )
+
+    if report.issues:
+        print("\nIssues:")
+
+        for issue in report.issues:
+            print(
+                f"  {issue.format()}"
+            )
+
+    # Lint is intentionally non-zero whenever there are
+    # findings. This makes CI able to detect potentially
+    # unsafe migrations while still reporting warnings/info.
+    if report.issues:
+        return 1
+
+    return 0
+
+
+def main(
+    argv: list[str] | None = None,
 ) -> int:
-    """Run the selected command."""
+    """Run the dbmigrate CLI."""
+    try:
+        args = parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code)
+
+    if args.command is None:
+        build_parser().print_help()
+        return 0
+
     command = resolve_command(
         args.command
     )
 
     if command is None:
         print(
-            "No command specified.",
+            f"Unknown command: {args.command}",
             file=sys.stderr,
         )
-        return 1
+        return 2
 
-    command_name = command.name
-
-    if command_name == "init":
-        return _run_init(
-            config
-        )
-
-    if command_name == "create":
-        return _run_create(
-            config,
-            args,
-        )
-
-    if command_name == "up":
-        return _run_up(
-            config
-        )
-
-    if command_name == "down":
-        return _run_down(
-            config,
-            args.steps,
-        )
-
-    if command_name == "status":
-        return _run_status(
-            config
-        )
-
-    if command_name == "history":
-        return _run_history(
-            config
-        )
-
-    if command_name == "current":
-        return _run_current(
-            config
-        )
-
-    if command_name == "validate":
-        return _run_validate(
-            config
-        )
-
-    if command_name == "plan":
-        return _run_plan(
-            config
-        )
-
-    if command_name == "lint":
-        return _run_lint(
-            config
-        )
-
-    if command_name == "explain":
-        return _run_explain(
-            config,
-            args,
-        )
-
-    if command_name == "impact":
-        return _run_impact(
-            config,
-            args,
-        )
-
-    if command_name == "schema":
-        return _run_schema(
-            config
-        )
-
-    if command_name == "schema-diff":
-        return _run_schema_diff(
-            config
-        )
-
-    if command_name == "fingerprint":
-        return _run_fingerprint(
-            config
-        )
-
-    if command_name == "doctor":
-        return _run_doctor(
-            config
-        )
-
-    if command_name == "check":
-        return _run_check(
-            config
-        )
-
-    if command_name == "verify-schema":
-        return _run_verify_schema(
-            config
-        )
-
-    print(
-        f"Command '{command_name}' is not implemented.",
-        file=sys.stderr,
+    return run_command(
+        command,
+        args,
     )
-    return 1
 
 
-def main(
-    argv: Sequence[str] | None = None,
-) -> int:
-    """Run the dbmigrate command-line interface."""
-    parser = build_parser()
-
-    try:
-        args = parser.parse_args(
-            argv
-        )
-    except SystemExit as exc:
-        return int(exc.code)
-
-    if args.command is None:
-        parser.print_help()
-        return 0
-
-    try:
-        config = load_config()
-    except ConfigurationError as exc:
-        print(
-            f"Configuration error: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
-        return run_command(
-            args,
-            config,
-        )
-    except (
-        MigrationDiscoveryError,
-        MigrationParseError,
-        MigrationRunnerError,
-        HistoryError,
-        MigrationStatusError,
-        DatabaseError,
-    ) as exc:
-        print(
-            str(exc),
-            file=sys.stderr,
-        )
-        return 1
+if __name__ == "__main__":
+    raise SystemExit(main())

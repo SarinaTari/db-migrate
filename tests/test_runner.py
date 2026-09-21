@@ -707,3 +707,55 @@ def test_rollback_steps_rejects_more_than_applied(
             )
     finally:
         database.close()
+
+def test_pending_uses_applied_versions(
+    tmp_path,
+) -> None:
+    from dbmigrate.database import SQLiteDatabase
+    from dbmigrate.history import MigrationHistory
+    from dbmigrate.migration import Migration
+    from dbmigrate.runner import MigrationRunner
+
+    database = SQLiteDatabase(
+        tmp_path / "database.db"
+    )
+    database.connect()
+
+    history = MigrationHistory(database)
+    history.initialize()
+
+    history.record(
+        version=1,
+        name="create_users",
+        checksum="abc",
+    )
+
+    migrations = (
+        Migration(
+            version=1,
+            name="create_users",
+            up_sql="CREATE TABLE users (id INTEGER);",
+            down_sql="DROP TABLE users;",
+            path=tmp_path / "001_create_users.sql",
+        ),
+        Migration(
+            version=2,
+            name="create_posts",
+            up_sql="CREATE TABLE posts (id INTEGER);",
+            down_sql="DROP TABLE posts;",
+            path=tmp_path / "002_create_posts.sql",
+        ),
+    )
+
+    runner = MigrationRunner(database)
+
+    pending = runner.pending(
+        migrations
+    )
+
+    assert [
+        migration.version
+        for migration in pending
+    ] == [2]
+
+    database.close()

@@ -425,3 +425,33 @@ def test_empty_checksum_is_rejected(
             )
     finally:
         database.close()
+
+def test_applied_versions_returns_version_set(
+    tmp_path,
+) -> None:
+    from dbmigrate.database import SQLiteDatabase
+    from dbmigrate.history import MigrationHistory
+
+    database = SQLiteDatabase(
+        tmp_path / "database.db"
+    )
+    database.connect()
+
+    history = MigrationHistory(database)
+    history.initialize()
+
+    history.record(
+        version=1,
+        name="create_users",
+        checksum="abc",
+    )
+
+    history.record(
+        version=2,
+        name="create_posts",
+        checksum="def",
+    )
+
+    assert history.applied_versions() == {1, 2}
+
+    database.close()
